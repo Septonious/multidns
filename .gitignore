@@ -1,0 +1,7 @@
+/dist/
+/android/.gradle/
+/android/local.properties
+**/build/
+*.aar
+*.log
+*.keystore
