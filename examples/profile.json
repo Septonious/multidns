@@ -1,0 +1,8 @@
+{
+ "name":"My server", "domain":"t.example.com", "client_id":"phone",
+ "key":"REPLACE_WITH_YOUR_RANDOM_SERVER_KEY",
+ "mode":"stripe", "window":8, "timeout_ms":1500,
+ "groups":[{"name":"Group 1","resolvers":["1.1.1.1","8.8.8.8"]}],
+ "default_action":"tunnel", "app_mode":"all", "apps":[],
+ "rules":[{"cidr":"192.168.0.0/16","action":"direct"},{"domain":"example.org","action":"block"}]
+}

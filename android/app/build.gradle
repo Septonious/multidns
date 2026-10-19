@@ -1,0 +1,19 @@
+plugins { id 'com.android.application' }
+android {
+ namespace 'org.multidns.app'
+ compileSdk 35
+ ndkVersion '28.0.13004108'
+ defaultConfig {
+  applicationId 'org.multidns.app'
+  minSdk 24
+  targetSdk 35
+  versionCode 1
+  versionName '0.1.0-prototype'
+  ndk { abiFilters 'arm64-v8a', 'x86_64' }
+  externalNativeBuild { ndkBuild { arguments "HEV_PATH=${rootProject.projectDir.parentFile}/build-deps/hev", 'APP_SUPPORT_FLEXIBLE_PAGE_SIZES=true' } }
+ }
+ externalNativeBuild { ndkBuild { path file('src/main/cpp/Android.mk') } }
+ compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+ lint { abortOnError true }
+}
+dependencies { implementation files('libs/multidns.aar') }
