@@ -1,0 +1,10 @@
+{
+  "go_race_tests": "passed",
+  "go_vet": "passed",
+  "go_test_functions": 16,
+  "android": "local debug APK; build and lint passed; physical device untested",
+  "github": "Source checkpoint f4db08b pushed to main; Actions run 39322975678 started; outcome pending",
+  "public_recursive_throughput": "not tested",
+  "source_checkpoint": "f4db08b0739240481c355925181c516ea99f83ad",
+  "restored_workspace_validation": "go test -race -count=1 ./... and go vet ./... passed; all seven artifact checksums verified"
+}

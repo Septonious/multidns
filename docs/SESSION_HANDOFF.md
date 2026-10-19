@@ -1,5 +1,15 @@
 # Session handoff — 19 October 2026
 
+## Publication update
+
+GitHub write access was restored in the continuation session. All four original
+checkpoints through `f4db08b` were pushed to `main`, and the first Actions run
+started: https://github.com/Septonious/multidns/actions/runs/39322975678.
+The locally validated APK, Linux binaries, checksums, and validation evidence are
+being retained in `dist/` in Git because the release API is unavailable from the
+execution environment. The earlier GitHub blocker below is historical.
+Physical-device and public-recursive-path testing remain outstanding.
+
 The user asked to save the workspace and end this session safely so they can
 publish the workspace and continue in a new session. Do not resume development
 or attempt another push until a new instruction arrives.
