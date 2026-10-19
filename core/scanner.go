@@ -15,6 +15,7 @@ import (
 )
 
 type ScanOptions struct {
+	ResumeAt  uint64  `json:"resume_at"`
 	Ranges    string  `json:"ranges"`
 	Workers   int     `json:"workers"`
 	TimeoutMS int     `json:"timeout_ms"`
@@ -22,6 +23,7 @@ type ScanOptions struct {
 	NSZone    string  `json:"ns_zone"`
 }
 type ScanResult struct {
+	Index      uint64 `json:"index"`
 	Endpoint   string `json:"endpoint"`
 	Responding bool   `json:"responding"`
 	TXT        bool   `json:"txt"`
@@ -123,28 +125,45 @@ func Scan(ctx context.Context, o ScanOptions, protector Protector, emit func(Sca
 	if e = o.Profile.Validate(); e != nil {
 		return e
 	}
-	jobs := make(chan string, o.Workers)
+	type job struct {
+		endpoint string
+		index    uint64
+	}
+	jobs := make(chan job, o.Workers)
 	var wg sync.WaitGroup
 	for i := 0; i < o.Workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for endpoint := range jobs {
+			for target := range jobs {
 				if ctx.Err() != nil {
 					return
 				}
-				emit(scanOne(ctx, o, endpoint, protector))
+				r := scanOne(ctx, o, target.endpoint, protector)
+				r.Index = target.index
+				if ctx.Err() == nil {
+					emit(r)
+				}
 			}
 		}()
 	}
+	var index uint64
 loop:
 	for _, r := range ranges {
 		for addr := r.lo; ; addr = addr.Next() {
+			if index < o.ResumeAt {
+				index++
+				if addr == r.hi {
+					break
+				}
+				continue
+			}
 			select {
-			case jobs <- net.JoinHostPort(addr.String(), r.port):
+			case jobs <- job{net.JoinHostPort(addr.String(), r.port), index}:
 			case <-ctx.Done():
 				break loop
 			}
+			index++
 			if addr == r.hi {
 				break
 			}

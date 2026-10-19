@@ -25,15 +25,20 @@ public final class TunnelService extends VpnService {
 
   static Notification notification(android.content.Context c, String title, int id) {
     NotificationManager nm = c.getSystemService(NotificationManager.class);
-    nm.createNotificationChannel(
-        new NotificationChannel("multidns", "MultiDNS", NotificationManager.IMPORTANCE_LOW));
+    if (Build.VERSION.SDK_INT >= 26)
+      nm.createNotificationChannel(
+          new NotificationChannel("multidns", "MultiDNS", NotificationManager.IMPORTANCE_LOW));
     PendingIntent open =
         PendingIntent.getActivity(
             c,
             id,
             new Intent(c, MainActivity.class),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-    return new Notification.Builder(c, "multidns")
+    Notification.Builder builder =
+        Build.VERSION.SDK_INT >= 26
+            ? new Notification.Builder(c, "multidns")
+            : new Notification.Builder(c);
+    return builder
         .setContentTitle(title)
         .setSmallIcon(android.R.drawable.stat_sys_upload_done)
         .setContentIntent(open)
@@ -83,6 +88,9 @@ public final class TunnelService extends VpnService {
             public void onAvailable(Network n) {
               network = n;
               setUnderlyingNetworks(new Network[] {n});
+              if (engine != null)
+                new Thread(() -> engine.networkChanged(), "multidns-rebind").start();
+              if (tun != null) state = "Connected";
             }
 
             @Override
@@ -199,25 +207,33 @@ public final class TunnelService extends VpnService {
   public void onDestroy() {
     stopping = true;
     handler.removeCallbacks(tick);
-    if (engine != null) engine.stop();
-    if (nativeThread != null) {
-      NativeTunnel.stop();
-      try {
-        nativeThread.join(2000);
-      } catch (InterruptedException ignored) {
-        Thread.currentThread().interrupt();
-      }
-    }
-    if (tun != null)
-      try {
-        tun.close();
-      } catch (Exception ignored) {
-      }
     if (connectivity != null && callback != null) connectivity.unregisterNetworkCallback(callback);
-    instance = null;
-    starting.set(false);
-    if ("Connected".equals(state) || "Connecting".equals(state)) state = "Disconnected";
-    stats = "{}";
+    new Thread(
+            () -> {
+              if (engine != null) engine.stop();
+              if (nativeThread != null) {
+                NativeTunnel.stop();
+                try {
+                  nativeThread.join(2000);
+                } catch (InterruptedException ignored) {
+                  Thread.currentThread().interrupt();
+                }
+              }
+              if (tun != null)
+                try {
+                  tun.close();
+                } catch (Exception ignored) {
+                }
+              if (instance == this) instance = null;
+              starting.set(false);
+              if ("Connected".equals(state)
+                  || "Connecting".equals(state)
+                  || "Disconnecting".equals(state)) state = "Disconnected";
+              stats = "{}";
+            },
+            "multidns-shutdown")
+        .start();
+    if ("Connected".equals(state) || "Connecting".equals(state)) state = "Disconnecting";
     super.onDestroy();
   }
 }

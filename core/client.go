@@ -26,6 +26,9 @@ type Stats struct {
 	Streams    int64  `json:"streams"`
 }
 type Client struct {
+	socketsMu sync.Mutex
+	sockets   map[string]*resolverSocket
+
 	adaptiveMu sync.Mutex
 	groups     []Group
 	health     map[string]*ResolverHealth
@@ -53,7 +56,7 @@ func NewClient(p Profile, protector Protector) (*Client, error) {
 		return nil, e
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &Client{Profile: p, dialer: &net.Dialer{Timeout: 10 * time.Second}, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 128), names: map[string]nameEntry{}}
+	c := &Client{Profile: p, dialer: &net.Dialer{Timeout: 10 * time.Second}, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 128), names: map[string]nameEntry{}, sockets: map[string]*resolverSocket{}}
 	var b [8]byte
 	if _, e := rand.Read(b[:]); e != nil {
 		cancel()
@@ -92,6 +95,11 @@ func NewClient(p Profile, protector Protector) (*Client, error) {
 }
 func (c *Client) Close() {
 	c.cancel()
+	c.socketsMu.Lock()
+	for _, socket := range c.sockets {
+		socket.close()
+	}
+	c.socketsMu.Unlock()
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
@@ -126,7 +134,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 		e error
 	}
 	groups := c.groupsSnapshot()
-	targets := groups[group%len(groups)].Resolvers
+	targets := c.raceTargets(groups[group%len(groups)], f.Bulk)
 	results := make(chan result, len(targets))
 	raceCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -143,7 +151,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			c.recordStart(addr)
 			dc := &dns.Client{Net: "udp", Timeout: time.Duration(c.Profile.TimeoutMS) * time.Millisecond, Dialer: c.dialer}
 			c.queries.Add(1)
-			r, _, err := dc.ExchangeContext(raceCtx, m.Copy(), addr)
+			r, err := c.exchangeUDP(raceCtx, m, addr)
 			if err == nil && r.Truncated {
 				dc.Net = "tcp"
 				r, _, err = dc.ExchangeContext(raceCtx, m.Copy(), addr)
@@ -317,7 +325,7 @@ func (s *Conn) prefetch() {
 			go func(ch chan readResult) {
 				ctx, cancel := s.opContext(true)
 				defer cancel()
-				b, e := s.client.rpc(ctx, frame{Op: opRead, Stream: s.id, Seq: num, Ack: s.readSeq.Load()}, s.group(num))
+				b, e := s.client.rpc(ctx, frame{Op: opRead, Stream: s.id, Seq: num, Ack: s.readSeq.Load(), Bulk: s.traffic.Load() >= 16*1024}, s.group(num))
 				ch <- readResult{b, e}
 			}(batch[i])
 		}
@@ -395,7 +403,7 @@ func (s *Conn) Write(b []byte) (int, error) {
 			go func(ch chan error) {
 				ctx, cancel := s.opContext(false)
 				defer cancel()
-				_, e := s.client.rpc(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Ack: s.readSeq.Load(), Data: data}, s.group(seq))
+				_, e := s.client.rpc(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Ack: s.readSeq.Load(), Data: data, Bulk: s.traffic.Load() >= 16*1024}, s.group(seq))
 				ch <- e
 			}(results[i])
 		}

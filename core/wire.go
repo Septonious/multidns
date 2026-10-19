@@ -33,6 +33,7 @@ const (
 var encoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 type frame struct {
+	Bulk    bool // local scheduler hint; never serialized
 	Op      byte
 	Session uint64
 	Stream  uint32

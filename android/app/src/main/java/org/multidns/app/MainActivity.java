@@ -76,7 +76,7 @@ public final class MainActivity extends Activity {
 
   private void layout() {
     root = new LinearLayout(this);
-    root.setOrientation(1);
+    root.setOrientation(LinearLayout.VERTICAL);
     root.setBackgroundColor(0xfff2f5f8);
     root.setPadding(dp(12), dp(20), dp(12), dp(8));
     TextView title = new TextView(this);
@@ -99,7 +99,7 @@ public final class MainActivity extends Activity {
     root.addView(nav);
     ScrollView scroll = new ScrollView(this);
     page = new LinearLayout(this);
-    page.setOrientation(1);
+    page.setOrientation(LinearLayout.VERTICAL);
     scroll.addView(page);
     root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     setContentView(root);
@@ -262,13 +262,18 @@ public final class MainActivity extends Activity {
         });
   }
 
+  private void startManagedService(Intent intent) {
+    if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
+    else startService(intent);
+  }
+
   private void connect() {
     if (TunnelService.instance != null) {
       error("Disconnect before switching servers.");
       return;
     }
     Intent i = new Intent(this, TunnelService.class).putExtra("profile", pendingProfile);
-    startForegroundService(i);
+    startManagedService(i);
   }
 
   private JSONObject empty() {
@@ -363,7 +368,7 @@ public final class MainActivity extends Activity {
             joinArray(original.optJSONArray("resolver_pool")),
             true);
     LinearLayout board = new LinearLayout(this);
-    board.setOrientation(1);
+    board.setOrientation(LinearLayout.VERTICAL);
     page.addView(board);
     ArrayList<ArrayList<String>> boardGroups = parseGroupText(members.getText().toString());
     ArrayList<String> standby = new ArrayList<>();
@@ -480,7 +485,7 @@ public final class MainActivity extends Activity {
     for (int index = -1; index < groups.size(); index++) {
       final int destination = index;
       LinearLayout box = new LinearLayout(this);
-      box.setOrientation(1);
+      box.setOrientation(LinearLayout.VERTICAL);
       box.setPadding(dp(8), dp(8), dp(8), dp(12));
       box.setBackgroundColor(index < 0 ? 0xffdce6ee : 0xffe0eee6);
       LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
@@ -489,7 +494,18 @@ public final class MainActivity extends Activity {
       text(box, index < 0 ? "Spare / unassigned pool" : "Group " + (index + 1));
       ArrayList<String> list = index < 0 ? standby : groups.get(index);
       for (String resolver : new ArrayList<>(list)) {
-        TextView card = text(box, "▦  " + resolver + "  · hold to drag");
+        String measured = "";
+        try {
+          JSONObject h =
+              new JSONObject(getSharedPreferences("latency", 0).getString(resolver, "{}"));
+          if (h.has("healthy"))
+            measured =
+                h.optBoolean("healthy")
+                    ? String.format(java.util.Locale.ROOT, " · %.1f ms", h.optDouble("rtt_ms"))
+                    : " · not working";
+        } catch (Exception ignored) {
+        }
+        TextView card = text(box, "▦  " + resolver + measured + "  · hold to drag");
         card.setBackgroundColor(0xffffffff);
         card.setPadding(dp(12), dp(12), dp(12), dp(12));
         card.setOnLongClickListener(
@@ -559,6 +575,10 @@ public final class MainActivity extends Activity {
                     message -> {
                       try {
                         JSONObject r = new JSONObject(message);
+                        getSharedPreferences("latency", 0)
+                            .edit()
+                            .putString(r.getString("endpoint"), message)
+                            .apply();
                         String line =
                             r.getString("endpoint")
                                 + "  "
@@ -742,7 +762,7 @@ public final class MainActivity extends Activity {
                     .put("timeout_ms", Integer.parseInt(timeout.getText().toString()))
                     .put("ns_zone", zone.getText().toString().trim())
                     .put("profile", profile());
-            startForegroundService(
+            startManagedService(
                 new Intent(this, ScannerService.class).putExtra("options", o.toString()));
           } catch (Exception e) {
             error(e.getMessage());
@@ -750,7 +770,28 @@ public final class MainActivity extends Activity {
         });
     button(
         page,
-        "Stop scan",
+        "Resume paused scan",
+        () -> {
+          try {
+            if (ScannerService.running) throw new Exception("Pause the current scan first");
+            JSONObject o =
+                new JSONObject()
+                    .put("ranges", ranges.getText().toString())
+                    .put("workers", Integer.parseInt(workers.getText().toString()))
+                    .put("timeout_ms", Integer.parseInt(timeout.getText().toString()))
+                    .put("ns_zone", zone.getText().toString().trim())
+                    .put("profile", profile());
+            startManagedService(
+                new Intent(this, ScannerService.class)
+                    .putExtra("options", o.toString())
+                    .putExtra("resume", true));
+          } catch (Exception e) {
+            error(e.getMessage());
+          }
+        });
+    button(
+        page,
+        "Pause / stop scan",
         () -> startService(new Intent(this, ScannerService.class).setAction("STOP")));
     button(
         page,

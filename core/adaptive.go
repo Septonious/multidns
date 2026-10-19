@@ -27,6 +27,36 @@ func (c *Client) groupsSnapshot() []Group {
 	defer c.adaptiveMu.Unlock()
 	return append([]Group(nil), c.groups...)
 }
+
+func (c *Client) raceTargets(g Group, bulk bool) []string {
+	if !c.Profile.Adaptive {
+		return g.Resolvers
+	}
+	c.adaptiveMu.Lock()
+	defer c.adaptiveMu.Unlock()
+	best := math.MaxFloat64
+	for _, addr := range g.Resolvers {
+		if h := c.health[addr]; h != nil && h.Healthy && h.RTTMS > 0 {
+			best = math.Min(best, h.RTTMS)
+		}
+	}
+	out := []string{}
+	for _, addr := range g.Resolvers {
+		h := c.health[addr]
+		if h != nil && !h.Healthy {
+			continue
+		}
+		if !bulk && h != nil && h.RTTMS > math.Max(200, best*4) {
+			continue
+		}
+		out = append(out, addr)
+	}
+	// If every path is currently down, keep recovery possible while health probes run.
+	if len(out) == 0 {
+		return g.Resolvers
+	}
+	return out
+}
 func (c *Client) healthSnapshot() []ResolverHealth {
 	c.adaptiveMu.Lock()
 	defer c.adaptiveMu.Unlock()
@@ -228,6 +258,9 @@ loop:
 	wg.Wait()
 }
 func FormGroups(pool []ResolverHealth, size, count int) ([]Group, []string) {
+	if size < 1 || count < 1 {
+		return nil, nil
+	}
 	healthy := []ResolverHealth{}
 	for _, h := range pool {
 		if h.Healthy {

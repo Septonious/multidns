@@ -6,6 +6,7 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.os.IBinder;
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import mobile.Engine;
 import mobile.Mobile;
@@ -17,6 +18,8 @@ public final class ScannerService extends Service {
   static volatile boolean running;
   static final ArrayList<String> recent = new ArrayList<>();
   private Engine engine;
+  private long nextIndex;
+  private final java.util.TreeSet<Long> completed = new java.util.TreeSet<>();
   private static final Object DB_LOCK = new Object();
 
   private static SQLiteDatabase db(Context c) {
@@ -24,6 +27,10 @@ public final class ScannerService extends Service {
     db.execSQL(
         "CREATE TABLE IF NOT EXISTS results(endpoint TEXT PRIMARY KEY,txt INTEGER,ns INTEGER,tunnel"
             + " INTEGER,rtt INTEGER,json TEXT)");
+    db.execSQL("CREATE INDEX IF NOT EXISTS results_all ON results(tunnel,rtt)");
+    db.execSQL("CREATE INDEX IF NOT EXISTS results_txt ON results(tunnel,txt,rtt)");
+    db.execSQL("CREATE INDEX IF NOT EXISTS results_ns ON results(tunnel,ns,rtt)");
+    db.execSQL("CREATE INDEX IF NOT EXISTS results_txt_ns ON results(tunnel,txt,ns,rtt)");
     return db;
   }
 
@@ -123,12 +130,34 @@ public final class ScannerService extends Service {
     state = "Scanning";
     engine = Mobile.newEngine();
     String options = intent.getStringExtra("options");
-    clear(this);
+    boolean resume = intent.getBooleanExtra("resume", false);
+    android.content.SharedPreferences prefs = getSharedPreferences("scan-progress", 0);
+    try {
+      JSONObject parsed = new JSONObject(options);
+      String fingerprint =
+          android.util.Base64.encodeToString(
+              java.security.MessageDigest.getInstance("SHA-256")
+                  .digest(options.getBytes(StandardCharsets.UTF_8)),
+              android.util.Base64.NO_WRAP);
+      if (resume && !fingerprint.equals(prefs.getString("fingerprint", "")))
+        throw new Exception("Scan settings changed. Start a new scan instead.");
+      nextIndex = resume ? prefs.getLong("next", 0) : 0;
+      parsed.put("resume_at", nextIndex);
+      options = parsed.toString();
+      prefs.edit().putString("fingerprint", fingerprint).putLong("next", nextIndex).apply();
+    } catch (Exception e) {
+      state = e.getMessage();
+      running = false;
+      stopSelf();
+      return START_NOT_STICKY;
+    }
+    if (!resume) clear(this);
+    final String scanOptions = options;
     new Thread(
             () -> {
               try {
                 engine.scan(
-                    options,
+                    scanOptions,
                     fd -> {
                       TunnelService vpn = TunnelService.instance;
                       return vpn == null || vpn.protectFD((int) fd);
@@ -148,6 +177,15 @@ public final class ScannerService extends Service {
                             db.insertWithOnConflict(
                                 "results", null, values, SQLiteDatabase.CONFLICT_REPLACE);
                           }
+                        }
+                        synchronized (completed) {
+                          long index = r.optLong("index");
+                          completed.add(index);
+                          while (completed.remove(nextIndex)) nextIndex++;
+                          getSharedPreferences("scan-progress", 0)
+                              .edit()
+                              .putLong("next", nextIndex)
+                              .apply();
                         }
                         scanned++;
                         if (r.optBoolean("tunnel")) working++;

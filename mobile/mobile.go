@@ -20,7 +20,14 @@ type Engine struct {
 	scanCancel context.CancelFunc
 }
 
-func NewEngine() *Engine            { return &Engine{} }
+func NewEngine() *Engine { return &Engine{} }
+func (e *Engine) NetworkChanged() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.client != nil {
+		e.client.ResetSockets()
+	}
+}
 func Validate(profile string) error { _, e := core.ParseProfile(profile); return e }
 func (e *Engine) Start(profile string, port int, protector Protector) error {
 	e.mu.Lock()
