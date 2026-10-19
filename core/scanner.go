@@ -157,6 +157,9 @@ loop:
 func scanOne(ctx context.Context, o ScanOptions, endpoint string, protector Protector) ScanResult {
 	result := ScanResult{Endpoint: endpoint}
 	p := o.Profile
+	p.Automatic = false
+	p.Adaptive = false
+	p.Pool = nil
 	p.Groups = []Group{{Resolvers: []string{endpoint}}}
 	p.TimeoutMS = o.TimeoutMS
 	c, e := NewClient(p, protector)

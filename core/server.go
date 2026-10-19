@@ -197,7 +197,6 @@ func (st *serverStream) open(data []byte) {
 	if e != nil {
 		return
 	}
-	defer c.Close()
 	for {
 		st.mu.Lock()
 		full := len(st.chunks) >= 64

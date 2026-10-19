@@ -5,3 +5,6 @@
 *.aar
 *.log
 *.keystore
+
+/build-deps/
+/android/app/src/main/assets/licenses/

@@ -19,6 +19,7 @@ func (c *Client) ServeSOCKS(l net.Listener) error {
 		if e != nil {
 			return e
 		}
+		c.proxies.Store(conn, true)
 		go c.handleSOCKS(conn)
 	}
 }
@@ -87,6 +88,7 @@ func appendAddress(dst []byte, address string) ([]byte, error) {
 }
 func (c *Client) handleSOCKS(conn net.Conn) {
 	defer conn.Close()
+	defer c.proxies.Delete(conn)
 	conn.SetDeadline(time.Now().Add(15 * time.Second))
 	var h [2]byte
 	if _, e := io.ReadFull(conn, h[:]); e != nil || h[0] != 5 || h[1] == 0 {
@@ -222,6 +224,10 @@ func (c *Client) serveUDPAssociation(control net.Conn) {
 					n, e := remote.Read(buf)
 					if e != nil {
 						break
+					}
+					_, port, _ := net.SplitHostPort(address)
+					if port == "53" {
+						c.observeDNS(buf[:n])
 					}
 					out, _ := appendAddress([]byte{0, 0, 0}, address)
 					out = append(out, buf[:n]...)

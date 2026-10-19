@@ -93,3 +93,21 @@ func (e *Engine) StopScan() {
 		e.scanCancel()
 	}
 }
+
+func (e *Engine) TestLatency(profile string, events Events) error {
+	p, err := core.ParseProfile(profile)
+	if err != nil {
+		return err
+	}
+	p.Automatic = false
+	p.Adaptive = false
+	c, err := core.NewClient(p, nil)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	c.TestLatency(ctx, func(h core.ResolverHealth) { b, _ := json.Marshal(h); events.OnEvent(string(b)) })
+	return nil
+}

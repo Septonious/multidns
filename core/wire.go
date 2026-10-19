@@ -104,7 +104,7 @@ func extract(m *dns.Msg, domain, key string) (frame, error) {
 func response(req *dns.Msg, f frame, key string) *dns.Msg {
 	m := new(dns.Msg)
 	m.SetReply(req)
- m.Compress=true
+	m.Compress = true
 	m.Authoritative = true
 	text := base64.RawStdEncoding.EncodeToString(f.pack(key))
 	parts := []string{}

@@ -22,6 +22,12 @@ type Rule struct {
 	Action   string `json:"action"`
 }
 type Profile struct {
+	Pool       []string `json:"resolver_pool,omitempty"`
+	Automatic  bool     `json:"automatic_groups"`
+	Adaptive   bool     `json:"adaptive"`
+	GroupSize  int      `json:"group_size"`
+	GroupCount int      `json:"group_count"`
+
 	Name          string   `json:"name"`
 	Domain        string   `json:"domain"`
 	ClientID      string   `json:"client_id"`
@@ -89,6 +95,18 @@ func (p *Profile) Validate() error {
 	if p.Window < 1 || p.Window > 32 {
 		return fmt.Errorf("window must be 1..32")
 	}
+	if len(p.Groups) == 0 && len(p.Pool) > 0 {
+		p.Groups = []Group{{Name: "Candidates", Resolvers: append([]string(nil), p.Pool...)}}
+	}
+	if p.GroupSize == 0 {
+		p.GroupSize = 2
+	}
+	if p.GroupCount == 0 {
+		p.GroupCount = 5
+	}
+	if p.GroupSize < 1 || p.GroupSize > 100 || p.GroupCount < 1 || p.GroupCount > 100 || p.GroupSize*p.GroupCount > 100 {
+		return fmt.Errorf("automatic groups require size/count 1..100 and capacity at most 100")
+	}
 	if len(p.Groups) == 0 {
 		return fmt.Errorf("at least one resolver group is required")
 	}
@@ -111,6 +129,23 @@ func (p *Profile) Validate() error {
 			g.Resolvers[j] = a
 			n++
 		}
+	}
+	poolSeen := map[string]bool{}
+	for _, g := range p.Groups {
+		for _, addr := range g.Resolvers {
+			poolSeen[addr] = true
+		}
+	}
+	for i, addr := range p.Pool {
+		normalized, e := Endpoint(addr)
+		if e != nil {
+			return e
+		}
+		p.Pool[i] = normalized
+		poolSeen[normalized] = true
+	}
+	if len(poolSeen) > 100 {
+		return fmt.Errorf("maximum 100 candidate resolvers")
 	}
 	if n > 100 {
 		return fmt.Errorf("maximum 100 active resolvers")
@@ -180,4 +215,24 @@ func (p Profile) Route(host string, port int, proto string) string {
 		return r.Action
 	}
 	return p.DefaultAction
+}
+
+func (p Profile) ResolverPool() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, g := range p.Groups {
+		for _, a := range g.Resolvers {
+			if !seen[a] {
+				seen[a] = true
+				out = append(out, a)
+			}
+		}
+	}
+	for _, a := range p.Pool {
+		if !seen[a] {
+			seen[a] = true
+			out = append(out, a)
+		}
+	}
+	return out
 }

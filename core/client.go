@@ -26,6 +26,16 @@ type Stats struct {
 	Streams    int64  `json:"streams"`
 }
 type Client struct {
+	adaptiveMu sync.Mutex
+	groups     []Group
+	health     map[string]*ResolverHealth
+	spares     []string
+	deficits   []float64
+
+	namesMu sync.RWMutex
+	names   map[string]nameEntry
+	proxies sync.Map
+
 	Profile                                         Profile
 	session                                         uint64
 	next                                            atomic.Uint32
@@ -43,7 +53,7 @@ func NewClient(p Profile, protector Protector) (*Client, error) {
 		return nil, e
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &Client{Profile: p, dialer: &net.Dialer{Timeout: 10 * time.Second}, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 128)}
+	c := &Client{Profile: p, dialer: &net.Dialer{Timeout: 10 * time.Second}, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 128), names: map[string]nameEntry{}}
 	var b [8]byte
 	if _, e := rand.Read(b[:]); e != nil {
 		cancel()
@@ -64,13 +74,41 @@ func NewClient(p Profile, protector Protector) (*Client, error) {
 			return e
 		}
 	}
+	c.groups = append([]Group(nil), p.Groups...)
+	c.health = map[string]*ResolverHealth{}
+	if p.Automatic {
+		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
+		c.TestLatency(ctx, nil)
+		cancel()
+		if !c.regroup() {
+			c.cancel()
+			return nil, fmt.Errorf("no healthy resolvers passed startup checks")
+		}
+	}
+	if p.Adaptive || p.Automatic {
+		go c.maintain()
+	}
 	return c, nil
 }
-func (c *Client) Close() { c.cancel() }
+func (c *Client) Close() {
+	c.cancel()
+	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
+}
 func (c *Client) Stats() Stats {
 	return Stats{c.queries.Load(), c.replies.Load(), c.retries.Load(), c.uploaded.Load(), c.downloaded.Load(), c.streams.Load()}
 }
-func (c *Client) StatsJSON() string { b, _ := json.Marshal(c.Stats()); return string(b) }
+func (c *Client) StatsJSON() string {
+	c.adaptiveMu.Lock()
+	spares := append([]string(nil), c.spares...)
+	c.adaptiveMu.Unlock()
+	b, _ := json.Marshal(struct {
+		Stats
+		Groups    []Group          `json:"groups"`
+		Resolvers []ResolverHealth `json:"resolvers"`
+		Spares    []string         `json:"spares"`
+	}{c.Stats(), c.groupsSnapshot(), c.healthSnapshot(), spares})
+	return string(b)
+}
 func freshNonce() uint64 {
 	var b [4]byte
 	_, _ = rand.Read(b[:])
@@ -87,7 +125,8 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 		f frame
 		e error
 	}
-	targets := c.Profile.Groups[group%len(c.Profile.Groups)].Resolvers
+	groups := c.groupsSnapshot()
+	targets := groups[group%len(groups)].Resolvers
 	results := make(chan result, len(targets))
 	raceCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -100,6 +139,8 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				results <- result{e: raceCtx.Err()}
 				return
 			}
+			started := time.Now()
+			c.recordStart(addr)
 			dc := &dns.Client{Net: "udp", Timeout: time.Duration(c.Profile.TimeoutMS) * time.Millisecond, Dialer: c.dialer}
 			c.queries.Add(1)
 			r, _, err := dc.ExchangeContext(raceCtx, m.Copy(), addr)
@@ -114,6 +155,11 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 					err = fmt.Errorf("mismatched response")
 				}
 			}
+			size := len(f.Data)
+			if err == nil && len(answer.Data) > size {
+				size = len(answer.Data)
+			}
+			c.recordEnd(addr, time.Since(started), size, err, raceCtx.Err() != nil)
 			if err == nil {
 				c.replies.Add(1)
 			}
@@ -143,7 +189,7 @@ func (c *Client) rpc(ctx context.Context, f frame, base int) ([]byte, error) {
 			return nil, net.ErrClosed
 		default:
 		}
-		answer, e := c.race(ctx, f, (base+attempt)%len(c.Profile.Groups))
+		answer, e := c.race(ctx, f, (base+attempt)%len(c.groupsSnapshot()))
 		if e == nil {
 			switch answer.Data[0] {
 			case statusOK:
@@ -183,7 +229,7 @@ func (c *Client) DialContext(ctx context.Context, network, address string) (net.
 	}
 	var port int
 	fmt.Sscanf(portText, "%d", &port)
-	switch c.Profile.Route(host, port, network) {
+	switch c.route(host, port, network) {
 	case "block":
 		return nil, fmt.Errorf("blocked by routing rule")
 	case "direct":
@@ -196,7 +242,7 @@ func (c *Client) DialContext(ctx context.Context, network, address string) (net.
 	if id == 0 {
 		return nil, fmt.Errorf("stream identifiers exhausted")
 	}
-	base := int(c.cursor.Add(1) % uint64(len(c.Profile.Groups)))
+	base := int(c.cursor.Add(1) % uint64(len(c.groupsSnapshot())))
 	data := []byte(address)
 	if network == "udp" {
 		data = []byte("udp:" + address)
@@ -224,6 +270,8 @@ type readResult struct {
 	e error
 }
 type Conn struct {
+	traffic atomic.Uint64
+
 	client                      *Client
 	id                          uint32
 	base                        int
@@ -239,11 +287,13 @@ type Conn struct {
 }
 
 func (s *Conn) group(seq uint32) int {
-	if s.client.Profile.Mode == "affinity" {
-		return s.base
+	base := s.base
+	if s.client.Profile.Mode != "affinity" {
+		base += int(seq)
 	}
-	return (s.base + int(seq)) % len(s.client.Profile.Groups)
+	return s.client.chooseGroup(base, s.traffic.Load() >= 16*1024)
 }
+
 func (s *Conn) opContext(read bool) (context.Context, context.CancelFunc) {
 	s.deadlineMu.Lock()
 	d := s.writeDeadline
@@ -318,6 +368,7 @@ func (s *Conn) Read(b []byte) (int, error) {
 		s.readSeq.Add(1)
 	}
 	s.client.downloaded.Add(uint64(n))
+	s.traffic.Add(uint64(n))
 	return n, nil
 }
 func (s *Conn) Write(b []byte) (int, error) {
@@ -354,6 +405,7 @@ func (s *Conn) Write(b []byte) (int, error) {
 			}
 			total += sizes[i]
 			s.client.uploaded.Add(uint64(sizes[i]))
+			s.traffic.Add(uint64(sizes[i]))
 		}
 	}
 	return total, nil
