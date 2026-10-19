@@ -26,3 +26,12 @@ Source references examined: SlipGate bf2df191a5da31cd447886c83568f676ebfee342;
 MasterDnsVPN acbf1c61f90786f41b975d2e2f616afbce292b29;
 SlipNet 552ab5078d90ae84294fcd6ef649b8e023ba2a63.
 The transport below is independently implemented; no upstream speed claims apply.
+
+Version 0.1.2 keeps wire framing v1. Rolling windows refill as the contiguous
+prefix completes, without waiting for the entire batch. Upload capacity is
+calculated from the encoded QNAME budget. Server downloads use up to 768 payload
+bytes, reduced for longer domains to fit a 1232-byte EDNS reply. A missing chunk
+can wait up to 80 ms on a broadcast notification before returning WAIT. UDP
+answers exceeding the advertised limit are truncated for TCP retry; the chunk
+itself remains unchanged. Download polls have a 96-request sublimit within the
+128-request client budget, leaving capacity for uploads and control traffic.

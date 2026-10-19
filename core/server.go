@@ -32,12 +32,14 @@ type serverStream struct {
 	eof       bool
 	closed    bool
 	last      time.Time
+	readSize  int
 }
 type Server struct {
 	Domain, Key string
 	mu          sync.Mutex
 	streams     map[streamKey]*serverStream
 	slots       chan struct{}
+	readSize    int
 }
 
 func NewServer(domain, key string) (*Server, error) {
@@ -45,7 +47,7 @@ func NewServer(domain, key string) (*Server, error) {
 	if e := p.Validate(); e != nil {
 		return nil, e
 	}
-	return &Server{Domain: p.Domain, Key: key, streams: map[streamKey]*serverStream{}, slots: make(chan struct{}, 256)}, nil
+	return &Server{Domain: p.Domain, Key: key, streams: map[streamKey]*serverStream{}, slots: make(chan struct{}, 256), readSize: downloadCapacity(p)}, nil
 }
 func (s *Server) ServeDNS(w dns.ResponseWriter, m *dns.Msg) {
 	select {
@@ -67,7 +69,17 @@ func (s *Server) ServeDNS(w dns.ResponseWriter, m *dns.Msg) {
 	}
 	data := s.handle(f)
 	f.Data = data
-	_ = w.WriteMsg(response(m, f, s.Key))
+	reply := response(m, f, s.Key)
+	if _, udp := w.RemoteAddr().(*net.UDPAddr); udp {
+		limit := uint16(512)
+		if opt := m.IsEdns0(); opt != nil {
+			limit = max(512, min(opt.UDPSize(), 1232))
+		}
+		// Preserve the full immutable chunk for TCP retry instead of sending an
+		// oversized datagram or changing the sequence's payload after truncation.
+		reply.Truncate(int(limit))
+	}
+	_ = w.WriteMsg(reply)
 }
 func (s *Server) handle(f frame) []byte {
 	if f.Op == opProbe {
@@ -81,7 +93,7 @@ func (s *Server) handle(f frame) []byte {
 			s.mu.Unlock()
 			return []byte{statusError}
 		}
-		st = &serverStream{ready: make(chan struct{}), notify: make(chan struct{}, 1), writes: map[uint32][]byte{}, chunks: map[uint32][]byte{}, last: time.Now()}
+		st = &serverStream{ready: make(chan struct{}), notify: make(chan struct{}), writes: map[uint32][]byte{}, chunks: map[uint32][]byte{}, last: time.Now(), readSize: s.readSize}
 		s.streams[k] = st
 		go st.open(f.Data)
 	}
@@ -103,12 +115,16 @@ func (s *Server) handle(f frame) []byte {
 	if f.Ack > st.nextRead {
 		return []byte{statusError}
 	}
+	freed := false
 	for seq := range st.chunks {
 		if seq < f.Ack {
 			delete(st.chunks, seq)
+			freed = true
 		}
 	}
-	st.signal()
+	if freed {
+		st.signal()
+	}
 	switch f.Op {
 	case opOpen:
 		return []byte{statusOK}
@@ -125,31 +141,61 @@ func (s *Server) handle(f frame) []byte {
 		if _, ok := st.writes[f.Seq]; !ok {
 			st.writes[f.Seq] = append([]byte(nil), f.Data...)
 		}
+		// Flush the contiguous prefix together instead of emitting one tiny TCP
+		// write for every DNS upload. Datagram framing is preserved by writePayload.
+		var payload []byte
+		nextWrite := st.nextWrite
 		for {
-			b, ok := st.writes[st.nextWrite]
+			b, ok := st.writes[nextWrite]
 			if !ok {
 				break
 			}
+			payload = append(payload, b...)
+			nextWrite++
+		}
+		if nextWrite != st.nextWrite {
 			_ = st.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
-			if e := st.writePayload(b); e != nil {
+			if e := st.writePayload(payload); e != nil {
 				st.err = e
 				return []byte{statusError}
 			}
-			delete(st.writes, st.nextWrite)
-			st.nextWrite++
+			for st.nextWrite < nextWrite {
+				delete(st.writes, st.nextWrite)
+				st.nextWrite++
+			}
 		}
 		return []byte{statusOK}
 	case opRead:
-		if b, ok := st.chunks[f.Seq]; ok {
-			return append([]byte{statusOK}, b...)
+		// Wait briefly for this exact immutable chunk. Immediate WAIT replies
+		// caused every idle stream/window position to poll repeatedly.
+		timer := time.NewTimer(80 * time.Millisecond)
+		defer timer.Stop()
+		for {
+			if st.err != nil {
+				return []byte{statusError}
+			}
+			if b, ok := st.chunks[f.Seq]; ok {
+				return append([]byte{statusOK}, b...)
+			}
+			if f.Seq < st.nextRead {
+				return []byte{statusError}
+			}
+			if st.eof || st.closed {
+				return []byte{statusEOF}
+			}
+			notify := st.notify
+			st.mu.Unlock()
+			expired := false
+			select {
+			case <-notify:
+			case <-timer.C:
+				expired = true
+			}
+			st.mu.Lock()
+			if expired {
+				return []byte{statusWait}
+			}
 		}
-		if f.Seq < st.nextRead {
-			return []byte{statusError}
-		}
-		if st.eof {
-			return []byte{statusEOF}
-		}
-		return []byte{statusWait}
 	case opHalfClose:
 		if f.Seq != st.nextWrite {
 			return []byte{statusWait}
@@ -168,10 +214,10 @@ func (s *Server) handle(f frame) []byte {
 	}
 }
 func (st *serverStream) signal() {
-	select {
-	case st.notify <- struct{}{}:
-	default:
-	}
+	// Called with st.mu held. Wake all readers waiting for different sequences
+	// as well as the producer waiting for an acknowledged buffer slot.
+	close(st.notify)
+	st.notify = make(chan struct{})
 }
 func (st *serverStream) open(data []byte) {
 	target := string(data)
@@ -201,18 +247,19 @@ func (st *serverStream) open(data []byte) {
 		st.mu.Lock()
 		full := len(st.chunks) >= 64
 		closed := st.closed
+		notify := st.notify
 		st.mu.Unlock()
 		if closed {
 			return
 		}
 		if full {
 			select {
-			case <-st.notify:
+			case <-notify:
 			case <-time.After(time.Second):
 			}
 			continue
 		}
-		b := make([]byte, chunkSize)
+		b := make([]byte, st.readSize)
 		if network == "udp" {
 			b = make([]byte, 65535)
 		}
@@ -223,7 +270,7 @@ func (st *serverStream) open(data []byte) {
 			binary.BigEndian.PutUint32(packet, uint32(n))
 			copy(packet[4:], b[:n])
 			for len(packet) > 0 {
-				size := min(chunkSize, len(packet))
+				size := min(st.readSize, len(packet))
 				st.appendChunk(packet[:size])
 				packet = packet[size:]
 			}
@@ -253,9 +300,10 @@ func (st *serverStream) appendChunk(b []byte) {
 			st.mu.Unlock()
 			return
 		}
+		notify := st.notify
 		st.mu.Unlock()
 		select {
-		case <-st.notify:
+		case <-notify:
 		case <-time.After(time.Second):
 		}
 	}

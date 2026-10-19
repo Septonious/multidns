@@ -13,7 +13,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-func testDNS(t *testing.T, handler dns.Handler) string {
+func testDNS(t testing.TB, handler dns.Handler) string {
 	t.Helper()
 	pc, e := net.ListenPacket("udp", "127.0.0.1:0")
 	if e != nil {
@@ -24,7 +24,7 @@ func testDNS(t *testing.T, handler dns.Handler) string {
 	t.Cleanup(func() { s.Shutdown() })
 	return pc.LocalAddr().String()
 }
-func testProfile(t *testing.T) (Profile, *Server) {
+func testProfile(t testing.TB) (Profile, *Server) {
 	t.Helper()
 	s, e := NewServer("t.test", "0123456789abcdef0123456789abcdef")
 	if e != nil {
@@ -41,7 +41,7 @@ func testProfile(t *testing.T) (Profile, *Server) {
 	}
 	return p, s
 }
-func echoTCP(t *testing.T) string {
+func echoTCP(t testing.TB) string {
 	l, e := net.Listen("tcp", "127.0.0.1:0")
 	if e != nil {
 		t.Fatal(e)

@@ -25,12 +25,43 @@ const (
 	statusWait  byte = 1
 	statusEOF   byte = 2
 	statusError byte = 3
-	chunkSize        = 640
+	chunkSize        = 768
 	headerSize       = 30
 	maxStreams       = 1024
 )
 
 var encoding = base32.StdEncoding.WithPadding(base32.NoPadding)
+
+// Find the largest upload that fits the actual encoded QNAME, including label
+// separators and the authentication header. This is calculated once per client.
+func uploadCapacity(p Profile) int {
+	lo, hi := 0, 160
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if _, err := query(frame{Op: opWrite, Data: make([]byte, mid)}, p); err == nil {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
+}
+
+func downloadCapacity(p Profile) int {
+	request, _ := query(frame{Op: opRead}, p)
+	lo, hi := 0, chunkSize
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		reply := response(request, frame{Op: opRead, Data: make([]byte, mid+1)}, p.Key)
+		packet, err := reply.Pack()
+		if err == nil && len(packet) <= 1232 {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
+}
 
 type frame struct {
 	Bulk    bool // local scheduler hint; never serialized
@@ -107,6 +138,9 @@ func response(req *dns.Msg, f frame, key string) *dns.Msg {
 	m.SetReply(req)
 	m.Compress = true
 	m.Authoritative = true
+	if opt := req.IsEdns0(); opt != nil {
+		m.SetEdns0(min(opt.UDPSize(), 1232), false)
+	}
 	text := base64.RawStdEncoding.EncodeToString(f.pack(key))
 	parts := []string{}
 	for len(text) > 0 {

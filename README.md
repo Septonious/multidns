@@ -42,11 +42,15 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. The APK is version 0.1.1,
-including the native VPN startup fix; Linux binaries remain at source checkpoint
-`f4db08b` and require no update for this Android fix.
+amd64/arm64 server, client, and scanner binaries. Version 0.1.2 improves the
+upload/download pipelines and server polling while retaining the native VPN
+startup fix. Update both the server binary and APK for the full improvement.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
+
+See [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) for tuning, counter definitions,
+and controlled before/after measurements. Resolver probe RTT is not a throughput
+measurement, and two members of a racing group duplicate requests.
 
 The GitHub Actions `Prototype builds` workflow tests Go, builds Linux amd64/arm64
 server and CLI binaries, builds a debug-signed Android APK, and uploads artifacts.

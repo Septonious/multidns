@@ -21,6 +21,7 @@ type Stats struct {
 	Queries    uint64 `json:"queries"`
 	Replies    uint64 `json:"replies"`
 	Retries    uint64 `json:"retries"`
+	Waits      uint64 `json:"waits"`
 	Uploaded   uint64 `json:"uploaded"`
 	Downloaded uint64 `json:"downloaded"`
 	Streams    int64  `json:"streams"`
@@ -39,16 +40,18 @@ type Client struct {
 	names   map[string]nameEntry
 	proxies sync.Map
 
-	Profile                                         Profile
-	session                                         uint64
-	next                                            atomic.Uint32
-	cursor                                          atomic.Uint64
-	queries, replies, retries, uploaded, downloaded atomic.Uint64
-	streams                                         atomic.Int64
-	dialer                                          *net.Dialer
-	ctx                                             context.Context
-	cancel                                          context.CancelFunc
-	slots                                           chan struct{}
+	Profile                                                Profile
+	session                                                uint64
+	next                                                   atomic.Uint32
+	cursor                                                 atomic.Uint64
+	queries, replies, retries, waits, uploaded, downloaded atomic.Uint64
+	streams                                                atomic.Int64
+	dialer                                                 *net.Dialer
+	ctx                                                    context.Context
+	cancel                                                 context.CancelFunc
+	slots                                                  chan struct{}
+	readSlots                                              chan struct{}
+	uploadSize                                             int
 }
 
 func NewClient(p Profile, protector Protector) (*Client, error) {
@@ -57,6 +60,9 @@ func NewClient(p Profile, protector Protector) (*Client, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Client{Profile: p, dialer: &net.Dialer{Timeout: 10 * time.Second}, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 128), names: map[string]nameEntry{}, sockets: map[string]*resolverSocket{}}
+	// Idle download polls must leave capacity for uploads and control requests.
+	c.readSlots = make(chan struct{}, 96)
+	c.uploadSize = uploadCapacity(p)
 	var b [8]byte
 	if _, e := rand.Read(b[:]); e != nil {
 		cancel()
@@ -103,7 +109,7 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{c.queries.Load(), c.replies.Load(), c.retries.Load(), c.uploaded.Load(), c.downloaded.Load(), c.streams.Load()}
+	return Stats{Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
@@ -140,6 +146,15 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 	defer cancel()
 	for _, addr := range targets {
 		go func(addr string) {
+			if f.Op == opRead {
+				select {
+				case c.readSlots <- struct{}{}:
+					defer func() { <-c.readSlots }()
+				case <-raceCtx.Done():
+					results <- result{e: raceCtx.Err()}
+					return
+				}
+			}
 			select {
 			case c.slots <- struct{}{}:
 				defer func() { <-c.slots }()
@@ -163,11 +178,15 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 					err = fmt.Errorf("mismatched response")
 				}
 			}
-			size := len(f.Data)
-			if err == nil && len(answer.Data) > size {
-				size = len(answer.Data)
+			size := 0
+			if err == nil && answer.Data[0] == statusOK {
+				if f.Op == opRead {
+					size = len(answer.Data) - 1
+				} else if f.Op == opWrite {
+					size = len(f.Data)
+				}
 			}
-			c.recordEnd(addr, time.Since(started), size, err, raceCtx.Err() != nil)
+			c.recordEnd(addr, time.Since(started), size, f.Op, err, raceCtx.Err() != nil)
 			if err == nil {
 				c.replies.Add(1)
 			}
@@ -185,11 +204,13 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 	return frame{}, last
 }
 func (c *Client) rpc(ctx context.Context, f frame, base int) ([]byte, error) {
+	return c.rpcACK(ctx, f, base, nil)
+}
+
+func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint32) ([]byte, error) {
 	delay := 20 * time.Millisecond
-	for attempt := 0; ; attempt++ {
-		if attempt > 0 {
-			c.retries.Add(1)
-		}
+	group := base
+	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -197,7 +218,10 @@ func (c *Client) rpc(ctx context.Context, f frame, base int) ([]byte, error) {
 			return nil, net.ErrClosed
 		default:
 		}
-		answer, e := c.race(ctx, f, (base+attempt)%len(c.groupsSnapshot()))
+		if ack != nil {
+			f.Ack = ack()
+		}
+		answer, e := c.race(ctx, f, group%len(c.groupsSnapshot()))
 		if e == nil {
 			switch answer.Data[0] {
 			case statusOK:
@@ -206,7 +230,18 @@ func (c *Client) rpc(ctx context.Context, f frame, base int) ([]byte, error) {
 				return nil, io.EOF
 			case statusError:
 				return nil, fmt.Errorf("server rejected operation %d", f.Op)
+			case statusWait:
+				c.waits.Add(1)
 			}
+		} else {
+			if ctx.Err() != nil || c.ctx.Err() != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				return nil, net.ErrClosed
+			}
+			c.retries.Add(1)
+			group++
 		}
 		timer := time.NewTimer(delay)
 		select {
@@ -294,12 +329,12 @@ type Conn struct {
 	closeOnce                   sync.Once
 }
 
-func (s *Conn) group(seq uint32) int {
+func (s *Conn) group(seq uint32, op byte) int {
 	base := s.base
 	if s.client.Profile.Mode != "affinity" {
 		base += int(seq)
 	}
-	return s.client.chooseGroup(base, s.traffic.Load() >= 16*1024)
+	return s.client.chooseGroup(base, s.traffic.Load() >= 16*1024, op)
 }
 
 func (s *Conn) opContext(read bool) (context.Context, context.CancelFunc) {
@@ -316,33 +351,46 @@ func (s *Conn) opContext(read bool) (context.Context, context.CancelFunc) {
 }
 func (s *Conn) prefetch() {
 	defer close(s.reads)
-	for seq := uint32(0); ; {
-		n := s.client.Profile.Window
-		batch := make([]chan readResult, n)
-		for i := 0; i < n; i++ {
-			batch[i] = make(chan readResult, 1)
-			num := seq + uint32(i)
-			go func(ch chan readResult) {
-				ctx, cancel := s.opContext(true)
-				defer cancel()
-				b, e := s.client.rpc(ctx, frame{Op: opRead, Stream: s.id, Seq: num, Ack: s.readSeq.Load(), Bulk: s.traffic.Load() >= 16*1024}, s.group(num))
-				ch <- readResult{b, e}
-			}(batch[i])
+	type completion struct {
+		seq uint32
+		readResult
+	}
+	window := uint32(s.client.Profile.Window)
+	results := make(chan completion, window)
+	pending := make(map[uint32]readResult, window)
+	next, delivered := uint32(0), uint32(0)
+	launch := func(seq uint32) {
+		go func() {
+			ctx, cancel := s.opContext(true)
+			defer cancel()
+			b, err := s.client.rpcACK(ctx, frame{Op: opRead, Stream: s.id, Seq: seq, Bulk: s.traffic.Load() >= 16*1024}, s.group(seq, opRead), s.readSeq.Load)
+			results <- completion{seq, readResult{b, err}}
+		}()
+	}
+	for {
+		for next-delivered < window {
+			launch(next)
+			next++
 		}
-		for _, ch := range batch {
-			var r readResult
+		select {
+		case result := <-results:
+			pending[result.seq] = result.readResult
+		case <-s.ctx.Done():
+			return
+		}
+		for {
+			result, ok := pending[delivered]
+			if !ok {
+				break
+			}
 			select {
-			case r = <-ch:
+			case s.reads <- result:
 			case <-s.ctx.Done():
 				return
 			}
-			select {
-			case s.reads <- r:
-			case <-s.ctx.Done():
-				return
-			}
-			seq++
-			if r.e != nil {
+			delete(pending, delivered)
+			delivered++
+			if result.e != nil {
 				return
 			}
 		}
@@ -382,38 +430,55 @@ func (s *Conn) Read(b []byte) (int, error) {
 func (s *Conn) Write(b []byte) (int, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	total := 0
-	// Compute capacity from the actual encoded name rather than assuming a short domain.
-	capacity := min(80, (240-len(s.client.Profile.Domain))*5/8-headerSize-8)
+	if len(b) == 0 {
+		return 0, nil
+	}
+	capacity := s.client.uploadSize
 	if capacity < 8 {
 		return 0, fmt.Errorf("domain leaves insufficient upload capacity")
 	}
-	for len(b) > 0 {
-		n := min(s.client.Profile.Window, (len(b)+capacity-1)/capacity)
-		results := make([]chan error, n)
-		sizes := make([]int, n)
-		for i := 0; i < n; i++ {
-			size := min(capacity, len(b))
-			data := append([]byte(nil), b[:size]...)
-			b = b[size:]
-			seq := s.writeSeq
+	ctx, cancel := s.opContext(false)
+	defer cancel()
+	type completion struct {
+		index, size int
+		err         error
+	}
+	window := s.client.Profile.Window
+	results := make(chan completion, window)
+	pending := make(map[int]completion, window)
+	next, acknowledged, offset, total := 0, 0, 0, 0
+	for offset < len(b) || acknowledged < next {
+		for offset < len(b) && next-acknowledged < window {
+			size := min(capacity, len(b)-offset)
+			data := append([]byte(nil), b[offset:offset+size]...)
+			index, seq := next, s.writeSeq
 			s.writeSeq++
-			sizes[i] = size
-			results[i] = make(chan error, 1)
-			go func(ch chan error) {
-				ctx, cancel := s.opContext(false)
-				defer cancel()
-				_, e := s.client.rpc(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Ack: s.readSeq.Load(), Data: data, Bulk: s.traffic.Load() >= 16*1024}, s.group(seq))
-				ch <- e
-			}(results[i])
+			offset += size
+			next++
+			go func() {
+				_, err := s.client.rpcACK(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Data: data, Bulk: s.traffic.Load() >= 16*1024}, s.group(seq, opWrite), s.readSeq.Load)
+				results <- completion{index, size, err}
+			}()
 		}
-		for i, ch := range results {
-			if e := <-ch; e != nil {
-				return total, e
+		select {
+		case result := <-results:
+			pending[result.index] = result
+		case <-ctx.Done():
+			return total, ctx.Err()
+		}
+		for {
+			result, ok := pending[acknowledged]
+			if !ok {
+				break
 			}
-			total += sizes[i]
-			s.client.uploaded.Add(uint64(sizes[i]))
-			s.traffic.Add(uint64(sizes[i]))
+			if result.err != nil {
+				return total, result.err
+			}
+			delete(pending, acknowledged)
+			acknowledged++
+			total += result.size
+			s.client.uploaded.Add(uint64(result.size))
+			s.traffic.Add(uint64(result.size))
 		}
 	}
 	return total, nil

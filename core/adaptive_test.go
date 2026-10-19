@@ -98,3 +98,32 @@ func TestObservedDNSRouting(t *testing.T) {
 		t.Fatal("unrelated IP matched")
 	}
 }
+
+func TestAdaptiveBulkRatesAreDirectional(t *testing.T) {
+	p, _ := testProfile(t)
+	p.Groups = []Group{{Resolvers: []string{"127.0.0.1:10001"}}, {Resolvers: []string{"127.0.0.1:10002"}}}
+	c, err := NewClient(p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Profile.Adaptive = true
+	c.health = map[string]*ResolverHealth{
+		"127.0.0.1:10001": {Healthy: true, RTTMS: 40, UploadRate: 10000, DownloadRate: 1000},
+		"127.0.0.1:10002": {Healthy: true, RTTMS: 40, UploadRate: 1000, DownloadRate: 10000},
+	}
+	for _, operation := range []byte{opWrite, opRead} {
+		c.deficits = nil
+		counts := [2]int{}
+		for range 100 {
+			counts[c.chooseGroup(0, true, operation)]++
+		}
+		want := 0
+		if operation == opRead {
+			want = 1
+		}
+		if counts[want] < 85 {
+			t.Fatalf("operation %d ignored directional capacity: %v", operation, counts)
+		}
+	}
+}

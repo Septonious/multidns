@@ -27,11 +27,12 @@ public final class MainActivity extends Activity {
   private boolean exportingScan;
   private boolean latencyRunning;
   private TextView latencyResults;
+  private long statsAt, statsUploaded, statsDownloaded;
   private final Runnable refresh =
       new Runnable() {
         public void run() {
           if (dashboard != null)
-            dashboard.setText(TunnelService.state + "\n" + TunnelService.stats);
+            dashboard.setText(TunnelService.state + "\n" + connectionSummary());
           if (scanStatus != null)
             scanStatus.setText(
                 ScannerService.state
@@ -111,6 +112,46 @@ public final class MainActivity extends Activity {
     scanStatus = null;
     scanResults = null;
     latencyResults = null;
+    statsAt = 0;
+  }
+
+  private String connectionSummary() {
+    try {
+      JSONObject stats = new JSONObject(TunnelService.stats);
+      if (!stats.has("queries")) {
+        statsAt = 0;
+        return "";
+      }
+      long now = SystemClock.elapsedRealtime();
+      long up = stats.optLong("uploaded"), down = stats.optLong("downloaded");
+      double uploadRate = 0, downloadRate = 0;
+      if (statsAt > 0 && now > statsAt && up >= statsUploaded && down >= statsDownloaded) {
+        uploadRate = (up - statsUploaded) * 0.008 / (now - statsAt);
+        downloadRate = (down - statsDownloaded) * 0.008 / (now - statsAt);
+      }
+      statsAt = now;
+      statsUploaded = up;
+      statsDownloaded = down;
+      JSONArray groups = stats.optJSONArray("groups");
+      JSONArray resolvers = stats.optJSONArray("resolvers");
+      int healthy = 0;
+      for (int i = 0; resolvers != null && i < resolvers.length(); i++)
+        if (resolvers.getJSONObject(i).optBoolean("healthy")) healthy++;
+      return String.format(
+          Locale.US,
+          "↓ %.2f Mbps   ↑ %.2f Mbps\n"
+              + "Downloaded %.2f MiB · Uploaded %.2f MiB\n"
+              + "%d streams · %d groups · %d/%d healthy resolvers\n"
+              + "DNS requests: %d · Valid replies: %d\n"
+              + "Network retries: %d · Server waits: %d",
+          downloadRate, uploadRate, down / 1048576.0, up / 1048576.0,
+          stats.optLong("streams"), groups == null ? 0 : groups.length(),
+          healthy, resolvers == null ? 0 : resolvers.length(),
+          stats.optLong("queries"), stats.optLong("replies"),
+          stats.optLong("retries"), stats.optLong("waits"));
+    } catch (JSONException e) {
+      return "Waiting for connection statistics";
+    }
   }
 
   private TextView text(LinearLayout parent, String content) {
@@ -207,6 +248,14 @@ public final class MainActivity extends Activity {
           });
       button(page, "Edit server and resolver groups", () -> edit(selected));
       button(page, "Test all resolver latencies (VPN off)", this::latencyTest);
+      button(
+          page,
+          "Copy connection diagnostics",
+          () -> {
+            getSystemService(ClipboardManager.class)
+                .setPrimaryClip(ClipData.newPlainText("MultiDNS diagnostics", TunnelService.stats));
+            Toast.makeText(this, "Connection diagnostics copied", Toast.LENGTH_SHORT).show();
+          });
       button(
           page,
           "Export profile without key",

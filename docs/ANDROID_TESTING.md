@@ -5,6 +5,12 @@ The APK is debug-signed for testing; preserve its signing key to update an exist
 installation. A different Actions runner can generate a different debug key, in
 which case uninstalling the previous APK is necessary before installation.
 
+Version 0.1.2 uses rolling request windows and shows live payload rates instead
+of raw JSON. "Copy connection diagnostics" retains access to the full counters
+and per-resolver state without including the authentication key. Update the
+server as well to enable bounded read long-polls and larger replies. Start with
+window 8 for comparison, then try 16; see [performance tuning](PERFORMANCE.md).
+
 Version 0.1.1 fixes a native-library loading defect when connecting. The HEV
 library is built without its upstream JNI registration for
 `hev.htproxy.TProxyService`; MultiDNS supplies its own JNI bridge. The build

@@ -1,5 +1,20 @@
 # Session handoff — 19 October 2026
 
+## Throughput follow-up: version 0.1.2
+
+The user confirmed 0.1.1 connects successfully on the Oppo. With ten resolvers
+in five two-member groups, the user measured 2.71 Mbps down and 0.15 Mbps up;
+small authenticated probes were 38.8–48.1 ms. These are user-reported results.
+
+Version 0.1.2 removes full-batch barriers, computes upload QNAME capacity, reserves
+upload/control capacity against idle polls, refreshes stream ACKs on retries,
+uses bounded server long-polls and larger EDNS-budgeted replies, coalesces queued
+upload writes, and schedules bulk reads/writes using separate payload-rate
+estimates. Server WAIT replies now have a separate counter from transport
+retries. The Android dashboard shows payload rates and offers a copy-diagnostics
+button. See docs/PERFORMANCE.md and dist/validation for measurements and checks.
+The replacement still needs testing on the user's actual phone/network.
+
 ## Android connection crash follow-up
 
 The user's server at `136.148.220.253` serves `t.atmosl.ink`, delegated through

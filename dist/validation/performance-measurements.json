@@ -1,0 +1,22 @@
+{
+  "before": {
+    "upload": {
+      "seconds": 10.460978596,
+      "queries": 2548.0
+    },
+    "download": {
+      "seconds": 1.287287325,
+      "queries": 260.0
+    }
+  },
+  "after": {
+    "upload": {
+      "seconds": 7.437248132,
+      "queries": 1677.0
+    },
+    "download": {
+      "seconds": 1.048487368,
+      "queries": 212.0
+    }
+  }
+}
