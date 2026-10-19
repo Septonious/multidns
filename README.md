@@ -41,8 +41,10 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 
 ## Builds
 
-The validated local builds from source checkpoint `f4db08b` are saved in [`dist/`](dist/):
-the Android debug APK and Linux amd64/arm64 server, client, and scanner binaries.
+Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
+amd64/arm64 server, client, and scanner binaries. The APK is version 0.1.1,
+including the native VPN startup fix; Linux binaries remain at source checkpoint
+`f4db08b` and require no update for this Android fix.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
 

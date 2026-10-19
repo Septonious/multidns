@@ -1,5 +1,20 @@
 # Session handoff — 19 October 2026
 
+## Android connection crash follow-up
+
+The user's server at `136.148.220.253` serves `t.atmosl.ink`, delegated through
+`ns2.atmosl.ink`. The user verified authenticated probes and HTTPS transfers
+directly and through both 1.1.1.1 and 8.8.8.8 from the VPS. The authentication key
+remains on the user's server and has not been shared with this workspace.
+
+The first APK crashed on connection on an Oppo Find X9 Ultra after VPN consent.
+Inspection found HEV's upstream JNI_OnLoad trying to register methods against
+`hev.htproxy.TProxyService`, a class not present in MultiDNS. Version 0.1.1 builds
+the HEV C API without that registration, preloads the bridge inside the guarded
+connection worker, and catches Java/linkage failures on the adapter thread.
+The new packaged-native check rejects the old APK. Successful connection with
+the replacement APK on the user's phone is still pending.
+
 ## Publication update
 
 GitHub write access was restored in the continuation session. All four original

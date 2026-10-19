@@ -4,6 +4,7 @@ import android.app.*;
 import android.content.Intent;
 import android.net.*;
 import android.os.*;
+import android.util.Log;
 import java.util.concurrent.atomic.AtomicBoolean;
 import mobile.Engine;
 import mobile.Mobile;
@@ -53,7 +54,12 @@ public final class TunnelService extends VpnService {
       stopSelf();
       return START_NOT_STICKY;
     }
-    startForeground(1, notification(this, "MultiDNS connecting", 1));
+    try {
+      startForeground(1, notification(this, "MultiDNS connecting", 1));
+    } catch (RuntimeException e) {
+      connectionFailed("VPN service startup", e);
+      return START_NOT_STICKY;
+    }
     if (!starting.compareAndSet(false, true)) return START_NOT_STICKY;
     stopping = false;
     instance = this;
@@ -67,6 +73,7 @@ public final class TunnelService extends VpnService {
       state = "Connecting";
       JSONObject p = new JSONObject(config);
       Mobile.validate(config);
+      NativeTunnel.ensureLoaded();
       connectivity = getSystemService(ConnectivityManager.class);
       NetworkRequest request =
           new NetworkRequest.Builder()
@@ -151,22 +158,31 @@ public final class TunnelService extends VpnService {
       nativeThread =
           new Thread(
               () -> {
-                int result = NativeTunnel.run(yaml, fd);
-                if (!stopping) {
-                  state = "VPN adapter stopped (" + result + ")";
-                  stopSelf();
+                try {
+                  int result = NativeTunnel.run(yaml, fd);
+                  if (!stopping) {
+                    state = "VPN adapter stopped (" + result + ")";
+                    stopSelf();
+                  }
+                } catch (Exception | LinkageError e) {
+                  connectionFailed("VPN adapter startup", e);
                 }
               },
               "multidns-tun");
-      nativeThread.start();
       state = "Connected";
+      nativeThread.start();
       getSystemService(NotificationManager.class)
           .notify(1, notification(this, "MultiDNS connected", 1));
       handler.post(tick);
     } catch (Exception | LinkageError e) {
-      state = "Connection failed: " + e.getMessage();
-      stopSelf();
+      connectionFailed("VPN connection", e);
     }
+  }
+
+  private void connectionFailed(String stage, Throwable error) {
+    Log.e("MultiDNS", stage + " failed", error);
+    if (!stopping) state = "Connection failed: " + stage + ": " + error;
+    stopSelf();
   }
 
   private final Runnable tick =
@@ -207,12 +223,21 @@ public final class TunnelService extends VpnService {
   public void onDestroy() {
     stopping = true;
     handler.removeCallbacks(tick);
-    if (connectivity != null && callback != null) connectivity.unregisterNetworkCallback(callback);
+    if (connectivity != null && callback != null)
+      try {
+        connectivity.unregisterNetworkCallback(callback);
+      } catch (IllegalArgumentException e) {
+        Log.w("MultiDNS", "Network callback was already unregistered", e);
+      }
     new Thread(
             () -> {
               if (engine != null) engine.stop();
               if (nativeThread != null) {
-                NativeTunnel.stop();
+                try {
+                  NativeTunnel.stop();
+                } catch (LinkageError e) {
+                  Log.e("MultiDNS", "VPN adapter cleanup failed", e);
+                }
                 try {
                   nativeThread.join(2000);
                 } catch (InterruptedException ignored) {

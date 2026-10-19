@@ -29,4 +29,9 @@ cp build-deps/hev/third-part/hev-task-system/LICENSE android/app/src/main/assets
 cp build-deps/hev/third-part/lwip/LICENSE android/app/src/main/assets/licenses/lwip.txt
 cp build-deps/hev/third-part/yaml/LICENSE android/app/src/main/assets/licenses/yaml.txt
 cd android
-./gradlew --no-daemon assembleDebug lintDebug
+tasks=(assembleDebug lintDebug)
+if [ "${CLEAN_ANDROID:-0}" = 1 ]; then
+ tasks=(clean "${tasks[@]}")
+fi
+./gradlew --no-daemon "${tasks[@]}"
+python3 ../scripts/check-android-native.py app/build/outputs/apk/debug/app-debug.apk

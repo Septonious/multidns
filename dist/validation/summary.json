@@ -2,9 +2,11 @@
   "go_race_tests": "passed",
   "go_vet": "passed",
   "go_test_functions": 16,
-  "android": "local debug APK; build and lint passed; physical device untested",
-  "github": "Source checkpoint f4db08b pushed to main; Actions run 39322975678 started; outcome pending",
-  "public_recursive_throughput": "not tested",
-  "source_checkpoint": "f4db08b0739240481c355925181c516ea99f83ad",
-  "restored_workspace_validation": "go test -race -count=1 ./... and go vet ./... passed; all seven artifact checksums verified"
+  "android": "0.1.1-prototype (versionCode 2); clean local debug APK build and lint passed; replacement physical-device connection pending",
+  "github": "APK, native-check evidence, build logs, and SHA256SUMS included with the Android 0.1.1 source update; CI results are separate",
+  "public_recursive_throughput": "User verified authenticated probes and HTTPS transfers via 1.1.1.1 and 8.8.8.8 from the VPS; no throughput benchmark",
+  "restored_workspace_validation": "go test -race -count=1 ./... and go vet ./... passed; all seven artifact checksums verified",
+  "android_native_check": "arm64-v8a and x86_64 passed; incompatible HEV JNI_OnLoad absent; MultiDNS JNI exports present; original APK fails the regression check",
+  "android_signing": "Signature verified; signing certificate matches the original published APK; 16 KB ZIP alignment verified",
+  "linux_source_checkpoint": "f4db08b0739240481c355925181c516ea99f83ad"
 }

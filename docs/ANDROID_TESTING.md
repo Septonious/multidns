@@ -5,6 +5,18 @@ The APK is debug-signed for testing; preserve its signing key to update an exist
 installation. A different Actions runner can generate a different debug key, in
 which case uninstalling the previous APK is necessary before installation.
 
+Version 0.1.1 fixes a native-library loading defect when connecting. The HEV
+library is built without its upstream JNI registration for
+`hev.htproxy.TProxyService`; MultiDNS supplies its own JNI bridge. The build
+script checks both packaged ABIs with `scripts/check-android-native.py` so that
+an APK containing the incompatible loader fails validation. Java/linkage errors
+during startup are reported in the connection status instead of escaping the
+adapter thread. This does not catch native signals such as SIGSEGV.
+
+When rebuilding an existing 0.1.0 checkout, use
+`CLEAN_ANDROID=1 bash scripts/build-android.sh`. NDK incremental builds can reuse
+the old shared library when a source file is removed from its link inputs.
+
 1. Deploy the Linux server and delegate its tunnel domain using NS and A/AAAA.
 2. Add a server profile with the domain and matching random authentication key.
 3. Enter the candidate resolvers. Press **Test all resolver latencies (VPN off)**.
