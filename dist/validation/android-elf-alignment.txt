@@ -1,6 +1,6 @@
+PASS lib/arm64-v8a/libgojni.so: ELF LOAD alignment >=16 KiB
 PASS lib/arm64-v8a/libhev-socks5-tunnel.so: ELF LOAD alignment >=16 KiB
 PASS lib/arm64-v8a/libmultidns-tun.so: ELF LOAD alignment >=16 KiB
+PASS lib/x86_64/libgojni.so: ELF LOAD alignment >=16 KiB
 PASS lib/x86_64/libhev-socks5-tunnel.so: ELF LOAD alignment >=16 KiB
 PASS lib/x86_64/libmultidns-tun.so: ELF LOAD alignment >=16 KiB
-PASS lib/arm64-v8a/libgojni.so: ELF LOAD alignment >=16 KiB
-PASS lib/x86_64/libgojni.so: ELF LOAD alignment >=16 KiB

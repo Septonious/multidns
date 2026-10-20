@@ -1,0 +1,4 @@
+PASS: all 39 APK ZIP entry names and contents are byte-identical.
+Archive size: 20499716 -> 13922524 bytes.
+Unused incremental ZIP gaps were removed by regenerating the APK output.
+Original signing certificate and native alignment verified separately.

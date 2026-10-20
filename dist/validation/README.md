@@ -35,3 +35,7 @@ shipped. A mixed-traffic race run timed out before its targeted recheck and the
 final complete suite passed. No physical Oppo, ICMP policy, or live native VPN
 lifecycle execution was available here. The updated device instrumentation was
 compiled, not run. Earlier release evidence is archived in versioned folders.
+
+`apk-compaction.txt` verifies that a fresh package removes incremental ZIP gaps
+(20,499,716 -> 13,922,524 bytes) while every APK entry remains byte-identical.
+The retained signature, all ABIs and native alignment were verified again.
