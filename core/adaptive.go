@@ -13,6 +13,10 @@ import (
 )
 
 type ResolverHealth struct {
+	CapacityLossCuts   int `json:"capacity_loss_cuts"`
+	CapacityDelayCuts  int `json:"capacity_delay_cuts"`
+	CapacityRecoveries int `json:"capacity_recoveries"`
+
 	Queries         uint64  `json:"queries"`
 	Replies         uint64  `json:"replies"`
 	Retransmissions uint64  `json:"retransmissions"`
@@ -100,6 +104,9 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 		copy.RXWorkers = settings.RXWorkers
 		if p := c.paths[h.Endpoint]; p != nil {
 			copy.Capacity = p.limit
+			copy.CapacityLossCuts = p.lossCuts
+			copy.CapacityDelayCuts = p.delayCuts
+			copy.CapacityRecoveries = p.recoveries
 			copy.WireInFlight = p.flight
 			copy.Queued = p.waiting
 		}

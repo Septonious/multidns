@@ -76,19 +76,19 @@
 /workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:713: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
     automatic.setText("Automatically form groups on each connection");
                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1538: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1549: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
                     selectedApps.setText(apps.size() + " apps selected");
                                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1538: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1549: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
                     selectedApps.setText(apps.size() + " apps selected");
                                                        ~~~~~~~~~~~~~~~~
-/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1682: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1693: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
     exact.setText("Match this domain only");
                   ~~~~~~~~~~~~~~~~~~~~~~~~
-/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1764: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1775: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
     txtFilter.setText("Only TXT verified");
                       ~~~~~~~~~~~~~~~~~~~
-/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1769: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+/workspace/multidns/android/app/src/main/java/org/multidns/app/MainActivity.java:1780: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
     nsFilter.setText("Also require NS → A");
                      ~~~~~~~~~~~~~~~~~~~~~
 

@@ -43,14 +43,16 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.3.0 adds shared
-resolver admission, interactive priority, latency-based congestion control,
+amd64/arm64 server, client, and scanner binaries. Version 0.3.1 repairs adaptive
+starvation and false capacity collapse from read long-polls in 0.3.0. It retains
+shared resolver admission, interactive priority, latency-based congestion control,
 independent-group failover/recovery, comprehensive dark diagnostics and per-path
 settings. **Find optimal parameters** measures authenticated payload sizes and
 TX/RX concurrency, with evidence and an explicit Apply action. See
 [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) for settings and counter definitions.
-Enable adaptive scheduling and update both server and APK. Existing profiles
-remain supported; XOR and the new parameter tests require the updated server.
+Install the 0.3.1 APK before enabling adaptive scheduling again. The 0.3.0 server
+is compatible with this hotfix. Existing profiles remain supported; XOR and
+parameter discovery require a server from 0.3.0 or later.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
 

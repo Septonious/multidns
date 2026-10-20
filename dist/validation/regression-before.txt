@@ -1,0 +1,12 @@
+=== RUN   TestSuccessfulLongPollDoesNotReduceCapacity
+    starvation_test.go:27: valid long-polls collapsed capacity from 8 to 2
+--- FAIL: TestSuccessfulLongPollDoesNotReduceCapacity (0.00s)
+=== RUN   TestSharedQueuedIdlePollRestoresCollapsedCapacity
+    starvation_test.go:47: shared backlog was ignored; successful idle reply could not restore capacity
+--- FAIL: TestSharedQueuedIdlePollRestoresCollapsedCapacity (0.00s)
+=== RUN   TestAgedBulkAdmissionIsNotBlockedByFreshInteractivePolls
+    starvation_test.go:118: aged bulk starved behind continuously fresh interactive work: context deadline exceeded
+--- FAIL: TestAgedBulkAdmissionIsNotBlockedByFreshInteractivePolls (0.30s)
+FAIL
+FAIL	github.com/Septonious/multidns/core	0.313s
+FAIL

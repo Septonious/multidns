@@ -16,6 +16,7 @@ type admission struct {
 }
 
 func (c *Client) wakeAdmissionsLocked() {
+	c.admissionChoiceValid = false
 	if c.admissionWake != nil {
 		close(c.admissionWake)
 	}
@@ -29,9 +30,9 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 		}
 	}
 	settings := c.Profile.ResolverSettings[addr]
-	// Bulk traffic must leave an interactive credit, but an interactive
-	// read already using that credit must not prevent the remaining TX slot.
-	if p.flight >= p.limit || bulk && p.bulk >= max(1, p.limit-1) {
+	// Priority is bounded in the shared queue, not enforced by a hard bulk
+	// reservation that can strand the only remaining direction credit.
+	if p.flight >= p.limit {
 		return false
 	}
 	if op == opRead {
@@ -77,7 +78,7 @@ func (c *Client) leasePathLocked(addr string, op byte, bulk bool) func() {
 func (c *Client) tryPath(addr string, op byte) (func(), error) {
 	c.adaptiveMu.Lock()
 	defer c.adaptiveMu.Unlock()
-	if !c.pathAvailableLocked(addr, op, true) {
+	if len(c.admissions) > 0 || !c.pathAvailableLocked(addr, op, true) {
 		return nil, errPathBusy
 	}
 	return c.leasePathLocked(addr, op, true), nil
@@ -90,6 +91,7 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 	a := &admission{bulk: bulk, op: op, started: time.Now()}
 	c.adaptiveMu.Lock()
 	c.admissions = append(c.admissions, a)
+	c.wakeAdmissionsLocked()
 	remove := func() {
 		for i, v := range c.admissions {
 			if v == a {
@@ -110,33 +112,8 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 			c.adaptiveMu.Unlock()
 			return "", nil, err
 		}
-		turn := true
-		for _, other := range c.admissions {
-			if other == a {
-				break
-			}
-			if other.bulk == bulk && other.op == op {
-				turn = false
-				break
-			}
-		}
-		if bulk {
-			for _, other := range c.admissions {
-				if !other.bulk && time.Since(other.started) < 100*time.Millisecond {
-					for _, g := range c.groups {
-						for _, addr := range g.Resolvers {
-							if c.pathAvailableLocked(addr, other.op, false) {
-								turn = false
-								break
-							}
-						}
-					}
-					if !turn {
-						break
-					}
-				}
-			}
-		}
+		turn := c.nextAdmissionLocked() == a
+
 		chosen := ""
 		best := math.MaxFloat64
 		sum := 0.0
@@ -206,4 +183,54 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 		timer.Stop()
 		c.adaptiveMu.Lock()
 	}
+}
+
+// A short request can overtake young bulk work, but work waiting 50 ms wins
+// over newer arrivals. Only eligible operations participate: blocked reads must
+// not prevent a writer from using the reserved TX room.
+func (c *Client) nextAdmissionLocked() *admission {
+	now := time.Now()
+	if c.admissionChoiceValid && now.Sub(c.admissionChoiceAt) < 10*time.Millisecond {
+		return c.admissionChoice
+	}
+	available := map[int]bool{}
+	checked := map[int]bool{}
+	ready := func(a *admission) bool {
+		class := int(a.op) * 2
+		if a.bulk {
+			class++
+		}
+		if !checked[class] {
+			checked[class] = true
+			for _, g := range c.groups {
+				for _, addr := range g.Resolvers {
+					if c.pathAvailableLocked(addr, a.op, a.bulk) {
+						available[class] = true
+						return true
+					}
+				}
+			}
+		}
+		return available[class]
+	}
+	var chosen *admission
+	for _, a := range c.admissions {
+		if !ready(a) {
+			continue
+		}
+		if chosen == nil {
+			chosen = a
+		}
+		if now.Sub(chosen.started) >= 50*time.Millisecond || !chosen.bulk {
+			break
+		}
+		if !a.bulk {
+			chosen = a
+			break
+		}
+	}
+	c.admissionChoice = chosen
+	c.admissionChoiceAt = now
+	c.admissionChoiceValid = true
+	return chosen
 }

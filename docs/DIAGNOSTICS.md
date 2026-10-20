@@ -51,7 +51,7 @@ chunk to move to another resolver without changing its sequence or contents.
 window, adaptive scheduling, automatic group size/count, maximum DNS timeout,
 added network-delay target and optional XOR obfuscation. The delay target is
 congestion-controller guidance, not a guarantee on application ping. The default
-is 30 ms above the recent minimum observed data-exchange RTT. **Reset resolver
+is 30 ms above the recent minimum observed upload-ACK RTT, with a jitter allowance. **Reset resolver
 limits to automatic** removes saved per-path overrides. Reconnect after changes.
 
 For independent paths, put one resolver per group; if automatic groups are
@@ -75,6 +75,15 @@ Live counters reset when a connection is started. The debug view provides:
   capacity, leased wire capacity, active operations and saved limits.
 - Accepted upload/download bytes. Retransmitted payload can be counted again;
   use the dashboard's application byte counters for end-to-end transfer totals.
+
+0.3.1 fixes a 0.3.0 admission/congestion regression. New short requests can
+only overtake eligible older work until it has waited 50 ms; that is an overtaking
+limit, not a promise that total queue delay is below 50 ms. Successful read
+long-polls never trigger delay-based cuts. That controller uses sustained,
+smoothed upload ACK timing with a jitter allowance. Successful idle polls check
+the shared backlog and can recover startup capacity after a loss episode.
+The debug view includes oldest admission age and separate capacity cut/recovery
+counters. A reachable authenticated resolver does not prove application transfer.
 
 A request in the shared admission queue has no resolver ownership. Per-resolver
 `queued` remains available for legacy path admission; `admission_queued` is the

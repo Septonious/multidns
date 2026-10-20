@@ -1,5 +1,5 @@
 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.11.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
-Daemon will be stopped at the end of the build 
+Daemon will be stopped at the end of the build
 Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
 > Task :app:preBuild UP-TO-DATE
 > Task :app:preDebugBuild UP-TO-DATE
@@ -18,13 +18,20 @@ Warning: SDK processing. This version only understands SDK XML versions up to 3 
 > Task :app:processDebugMainManifest
 > Task :app:processDebugManifest
 > Task :app:mergeDebugShaders UP-TO-DATE
+> Task :app:processDebugManifestForPackage
 > Task :app:compileDebugShaders NO-SOURCE
 > Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets UP-TO-DATE
-> Task :app:processDebugManifestForPackage
 > Task :app:compressDebugAssets UP-TO-DATE
+> Task :app:desugarDebugFileDependencies UP-TO-DATE
+> Task :app:processDebugJavaRes NO-SOURCE
+> Task :app:mergeDebugJavaResource UP-TO-DATE
+> Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :app:configureNdkBuildDebug[arm64-v8a]
 > Task :app:processDebugResources
-> Task :app:desugarDebugFileDependencies
+> Task :app:buildNdkBuildDebug[arm64-v8a]
 
 > Task :app:compileDebugJavaWithJavac
 Note: Some input files use or override a deprecated API.
@@ -32,15 +39,8 @@ Note: Recompile with -Xlint:deprecation for details.
 
 > Task :app:dexBuilderDebug
 > Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
-> Task :app:processDebugJavaRes NO-SOURCE
-> Task :app:checkDebugDuplicateClasses UP-TO-DATE
-> Task :app:mergeDebugJavaResource
-> Task :app:mergeLibDexDebug UP-TO-DATE
-> Task :app:mergeExtDexDebug
-> Task :app:mergeProjectDexDebug
-> Task :app:configureNdkBuildDebug[arm64-v8a]
-> Task :app:buildNdkBuildDebug[arm64-v8a]
 > Task :app:configureNdkBuildDebug[x86_64]
+> Task :app:mergeProjectDexDebug
 > Task :app:buildNdkBuildDebug[x86_64]
 > Task :app:mergeDebugJniLibFolders UP-TO-DATE
 > Task :app:validateSigningDebug UP-TO-DATE
@@ -69,7 +69,7 @@ Wrote HTML report to file:///workspace/multidns/android/app/build/reports/lint-r
 > Task :app:lintDebug
 [Incubating] Problems report is available at: file:///workspace/multidns/android/build/reports/problems/problems-report.html
 
-BUILD SUCCESSFUL in 1m 29s
-50 actionable tasks: 29 executed, 21 up-to-date
+BUILD SUCCESSFUL in 2m 17s
+50 actionable tasks: 26 executed, 24 up-to-date
 PASS arm64-v8a: HEV C API and MultiDNS JNI bridge
 PASS x86_64: HEV C API and MultiDNS JNI bridge

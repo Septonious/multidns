@@ -109,3 +109,20 @@ while the next-minus-contiguous-prefix position must still fit the separately
 negotiated reorder bound. Slow or lost chunks retain their ARQ identity without
 idling all fast-path workers. Write returns only after the flush barrier commits
 its full prefix to the destination socket.
+
+
+## 0.3.1 admission and capacity repair
+
+0.3.0's strict short-request preference could indefinitely postpone bulk, while
+its delay controller misclassified successful read long-poll wait as congestion.
+The shared selector now chooses eligible work in arrival order once its wait is
+50 ms; young bulk can be overtaken by short requests before then. Availability is
+checked before ordering, so an RX credit bound does not prevent TX progress.
+Queued primaries also precede speculative hedges. Combined path/RX/TX ceilings
+and control reservations remain; no hard extra bulk-credit reservation applies.
+
+Only successful write ACKs feed the delay controller. It uses smoothed RTT and
+jitter, requires sustained inflation and retains cut timing guards. Idle success
+can restore capacity to startup from shared backlog, rather than looking only at
+the obsolete per-path primary queue. Loss cuts, delay cuts and idle recoveries
+are reported independently. Wire protocol and server behavior are unchanged.

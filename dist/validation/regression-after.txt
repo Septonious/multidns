@@ -1,0 +1,14 @@
+=== RUN   TestSuccessfulLongPollDoesNotReduceCapacity
+--- PASS: TestSuccessfulLongPollDoesNotReduceCapacity (0.00s)
+=== RUN   TestSharedQueuedIdlePollRestoresCollapsedCapacity
+--- PASS: TestSharedQueuedIdlePollRestoresCollapsedCapacity (0.00s)
+=== RUN   TestAgedBulkAdmissionIsNotBlockedByFreshInteractivePolls
+--- PASS: TestAgedBulkAdmissionIsNotBlockedByFreshInteractivePolls (0.00s)
+=== RUN   TestWriteDelayControllerIgnoresJitterButStillRespondsToPersistentQueue
+--- PASS: TestWriteDelayControllerIgnoresJitterButStillRespondsToPersistentQueue (0.00s)
+=== RUN   TestBlockedOlderReadDoesNotPreventWriteAdmission
+--- PASS: TestBlockedOlderReadDoesNotPreventWriteAdmission (0.00s)
+=== RUN   TestRepliesStartedBeforeCutCannotImmediatelyRegrowCapacity
+--- PASS: TestRepliesStartedBeforeCutCannotImmediatelyRegrowCapacity (0.00s)
+PASS
+ok  	github.com/Septonious/multidns/core	0.028s

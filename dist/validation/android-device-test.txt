@@ -1,1 +1,1 @@
-No physical Oppo device or successful emulator runtime available. APK build/lint/native/signing/alignment checks passed; real-phone connection, throughput and loaded RTT remain pending.
+No physical Oppo runtime or production link measurement is available here. Signed APK build/lint/native/alignment checks pass. Install the hotfix as an update and verify application traffic on the phone.

@@ -38,6 +38,10 @@ type Stats struct {
 	Streams    int64  `json:"streams"`
 }
 type Client struct {
+	admissionChoice      *admission
+	admissionChoiceAt    time.Time
+	admissionChoiceValid bool
+
 	socketsMu    sync.Mutex
 	sockets      map[string]*resolverSocket
 	socketsEpoch uint64
@@ -153,12 +157,16 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{TransportVersion: "0.3.0", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
+	return Stats{TransportVersion: "0.3.1", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
 	spares := append([]string(nil), c.spares...)
 	queued := len(c.admissions)
+	oldestMS := 0.0
+	for _, a := range c.admissions {
+		oldestMS = max(oldestMS, float64(time.Since(a.started).Microseconds())/1000)
+	}
 	c.adaptiveMu.Unlock()
 	b, _ := json.Marshal(struct {
 		Stats
@@ -166,7 +174,8 @@ func (c *Client) StatsJSON() string {
 		Resolvers []ResolverHealth `json:"resolvers"`
 		Spares    []string         `json:"spares"`
 		Queued    int              `json:"admission_queued"`
-	}{c.Stats(), c.groupsSnapshot(), c.healthSnapshot(), spares, queued})
+		OldestMS  float64          `json:"oldest_admission_ms"`
+	}{c.Stats(), c.groupsSnapshot(), c.healthSnapshot(), spares, queued, oldestMS})
 	return string(b)
 }
 func freshNonce() uint64 {

@@ -11,6 +11,10 @@ import (
 // prevent ten busy streams from flooding the same recursive resolver.
 // Admission happens before global slots and before starting an exchange timer.
 type pathState struct {
+	lossCuts, delayCuts, recoveries int
+	txRTT, txVariance               float64
+	delaySamples                    int
+
 	bulk                                     int
 	retryAt                                  time.Time
 	flight, reads, waiting, limit, successes int
@@ -95,34 +99,61 @@ func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error,
 			return
 		}
 		p.limit = max(2, p.limit/2)
+		p.lossCuts++
 		p.successes = 0
 		p.lastCut = now
 		p.signal()
 		return
 	}
 	if size <= 0 {
-		// Successful queued polls can recover a recently collapsed path to its
-		// startup budget; idle traffic never inflates it beyond that budget.
-		if p.waiting > 0 && p.limit < max(2, min(8, c.Profile.Window)) && now.Sub(p.lastCut) > time.Second && now.Sub(p.lastIdleGrowth) > time.Second {
+		// Adaptive primaries wait in the shared queue, not p.waiting. Successful
+		// idle polls must be able to restore startup capacity after a loss episode.
+		startup := min(c.pathCeiling(addr), max(2, min(8, c.Profile.Window)))
+		if (p.waiting > 0 || len(c.admissions) > 0) && p.limit < startup && now.Sub(p.lastCut) > time.Second && now.Sub(p.lastIdleGrowth) > 500*time.Millisecond {
 			p.limit++
+			p.recoveries++
 			p.lastIdleGrowth = now
 			p.signal()
+			c.wakeAdmissionsLocked()
 		}
 		return
-	} // Empty long-polls do not prove bulk capacity.
-	// Delay-based control acts before loss, keeping the network queue near
-	// the requested budget. Idle long-polls were excluded above.
-	rtt := float64(elapsed.Microseconds()) / 1000
-	if p.minRTT == 0 || rtt < p.minRTT || now.Sub(p.baselineAt) > 30*time.Second {
-		p.minRTT = rtt
-		p.baselineAt = now
 	}
-	if rtt > p.minRTT+float64(c.Profile.LatencyTargetMS) && now.Sub(p.lastCut) > 300*time.Millisecond {
-		p.limit = max(2, p.limit-max(1, p.limit/5))
-		p.successes = 0
-		p.lastCut = now
-		p.signal()
-		c.wakeAdmissionsLocked()
+	// Read replies, including nonempty ones, can include the server's deliberate
+	// 80 ms wait. They cannot identify network congestion. Use smoothed write ACK
+	// timing, sustained samples and a jitter allowance instead of individual reads.
+	if op == opWrite {
+		rtt := float64(elapsed.Microseconds()) / 1000
+		if p.minRTT == 0 || rtt < p.minRTT || now.Sub(p.baselineAt) > 30*time.Second {
+			p.minRTT = rtt
+			p.baselineAt = now
+		}
+		if p.txRTT == 0 {
+			p.txRTT = rtt
+		} else {
+			p.txVariance = .75*p.txVariance + .25*absFloat(rtt-p.txRTT)
+			p.txRTT = .875*p.txRTT + .125*rtt
+		}
+		threshold := p.minRTT + max(float64(c.Profile.LatencyTargetMS), 4*p.txVariance)
+		if p.txRTT > threshold {
+			p.delaySamples++
+		} else {
+			p.delaySamples = 0
+		}
+		if p.delaySamples >= 4 && now.Sub(p.lastCut) > max(500*time.Millisecond, time.Duration(4*p.minRTT)*time.Millisecond) && !now.Add(-elapsed).Before(p.lastCut) {
+			p.limit = max(2, p.limit-max(1, p.limit/5))
+			p.delayCuts++
+			p.successes = 0
+			p.delaySamples = 0
+			p.lastCut = now
+			p.signal()
+			c.wakeAdmissionsLocked()
+			return
+		}
+	}
+
+	// Replies from requests sent before a cut cannot immediately regrow the
+	// reduced budget. Require new evidence after the old burst has drained.
+	if now.Sub(p.lastCut) < 200*time.Millisecond || now.Add(-elapsed).Before(p.lastCut) {
 		return
 	}
 	p.successes++
@@ -139,4 +170,11 @@ func (c *Client) pathCeiling(addr string) int {
 		return max(2, max(settings.TXWorkers, settings.RXWorkers))
 	}
 	return 32
+}
+
+func absFloat(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

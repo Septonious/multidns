@@ -1089,6 +1089,11 @@ public final class MainActivity extends Activity {
       };
       for (int i = 0; i < keys.length; i++)
         total.append(labels[i]).append(": ").append(stats.optLong(keys[i])).append("\n");
+      total.append(
+          String.format(
+              Locale.ROOT,
+              "Oldest queued request: %.1f ms\n",
+              stats.optDouble("oldest_admission_ms")));
       diagnosticsSummary.setText(total.toString());
       JSONArray resolvers = stats.optJSONArray("resolvers");
       for (int i = 0; resolvers != null && i < resolvers.length(); i++) {
@@ -1104,7 +1109,7 @@ public final class MainActivity extends Activity {
         }
         StringBuilder row =
             new StringBuilder(
-                r.optBoolean("healthy") ? "Healthy" : "Unavailable · redistributing work");
+                r.optBoolean("healthy") ? "Reachable" : "Unavailable · redistributing work");
         row.append(
             String.format(
                 Locale.ROOT,
@@ -1116,6 +1121,9 @@ public final class MainActivity extends Activity {
                 r.optDouble("max_queue_ms")));
         String[] names = {
           "Capacity",
+          "Capacity cuts from loss",
+          "Capacity cuts from upload delay",
+          "Idle capacity recoveries",
           "Wire in flight",
           "Active requests",
           "Attempts",
@@ -1138,6 +1146,9 @@ public final class MainActivity extends Activity {
         };
         String[] fields = {
           "capacity",
+          "capacity_loss_cuts",
+          "capacity_delay_cuts",
+          "capacity_recoveries",
           "wire_in_flight",
           "in_flight",
           "queries",

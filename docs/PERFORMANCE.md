@@ -1,5 +1,43 @@
 # Performance and tuning
 
+## Version 0.3.1: repair 0.3.0 starvation and capacity collapse
+
+The user's real 0.3.0 link became unusable despite successful authentication.
+Its snapshot showed 162 queued requests, seven paths at capacity two (one at
+three), and per-path admission peaks above 33 seconds. Even a resolver with zero
+timeouts collapsed to two credits. This is a client regression; the earlier
+controlled throughput comparisons did not cover this failure condition and do
+not establish real-link usability.
+
+Three reproductions fail on 0.3.0 and pass after the fix:
+
+- Nonempty reads can include the server's deliberate 80 ms long-poll. Mixing
+  those timings with immediate write ACKs falsely cut capacity from eight to
+  two. Reads no longer drive delay cuts; sustained smoothed write ACK delay,
+  with jitter allowance, still reduces capacity under actual delay inflation.
+- Idle-poll recovery checked `path.waiting`, although adaptive primary work waits
+  in `client.admissions`. Successful idle replies now inspect the shared backlog,
+  recovering toward the startup limit while respecting configured ceilings and
+  loss cooldown. They do not grow indefinitely on empty polls.
+- Fresh short requests could continuously preempt eligible bulk work. Selection
+  now honors the oldest eligible operation after 50 ms of waiting. Blocked reads
+  do not block free TX room, and hedge attempts cannot bypass queued primaries.
+  A short-lived cached selection reduces repeated scans during shared wakeups.
+  Hard bulk-credit reservation is removed; bounded priority handles short flows.
+
+New regression coverage starts 26 idle streams, forcibly collapses all eight
+path budgets to two and runs concurrent byte-verified TLS HTTPS uploads/downloads
+while injecting successful read delays. Groups of one and two are both checked,
+along with fixed-scheduling fallback. A separate test verifies write jitter does
+not cut capacity but persistent write delay still does. Capacity-loss cuts,
+capacity-delay cuts, idle capacity recoveries and oldest queued age are exposed
+in diagnostics. Full raw results are in `dist/validation`.
+
+These are regression checks, not a phone throughput claim. No physical Oppo or
+production-link measurement is available here. The unchanged 0.3.0 server protocol
+is compatible with the repaired APK. Disabling adaptive scheduling is a temporary
+workaround in 0.3.0; install the hotfix before enabling it again.
+
 ## Version 0.3.0: selective upload credits and loaded application latency
 
 The user reported 3.42 Mbit/s download, 0.40 Mbit/s upload, 121 ms unloaded ping,

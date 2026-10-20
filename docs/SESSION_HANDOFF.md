@@ -1,3 +1,79 @@
+# Version 0.3.1 — 20 October 2026
+
+Current release: see repository HEAD. Previous source e064927 / 0.3.0.
+User reports no usable connection/Speedtest: 162 shared queued requests, seven
+resolver budgets at two and one at three, admission peaks up to 33.456 seconds.
+118 observed timeouts / 10476 attempts, no DNS/auth/socket errors; even the
+zero-timeout resolver collapsed to two credits. This is a 0.3.0 client regression.
+Do not cite previous synthetic speedups as proof of real-link usability.
+
+Immediate workaround verified in the local HTTPS fixture: disconnect, edit the
+profile, disable Adapt paths / adaptive scheduling, retain base window8, save and
+reconnect. Server-only rollback does not repair the client admission bug. Existing
+0.3.0 server remains compatible with the repaired APK; no VPS access/key here.
+
+Fixes:
+- Successful read replies can include 80 ms deliberate server wait, even when
+  nonempty. Exclude all reads from delay-based cuts; use sustained smoothed WRITE
+  ACK RTT with jitter allowance. A test drives eight credits to two on 0.3.0 using
+  valid reads, and passes after the fix. Persistent write delay still cuts, normal
+  write jitter does not. Do not regress this to per-packet read delay feedback.
+- Idle recovery now checks shared admissions as well as legacy path.waiting.
+  Successful queued empty polls restore startup capacity after loss cooldown,
+  respecting configured ceilings. Old in-flight replies cannot immediately undo
+  cuts: payload growth has a 200 ms/new-evidence hold. Bounded idle growth remains.
+- Shared admission selects oldest eligible work after 50 ms of waiting. Young
+  bulk can be overtaken by short requests, but fresh arrivals cannot perpetually
+  preempt aged bulk. 50 ms limits overtaking, not total possible queue delay.
+  Operation eligibility is checked before ordering; blocked RX does not block TX.
+  A cached decision (invalidated on queue/lease/health changes, <=10ms age) avoids
+  repeated queue scans on shared wakeups. Hard extra bulk-credit reservation was
+  removed. RX/TX/combined budgets and reserved shared control positions remain.
+- Busy/queued primaries precede speculative hedges; one-member unique work,
+  paired delayed backups, selective ACK/refill, wire-credit retention and ARQ
+  remain. No server protocol or encryption changes.
+- Debug JSON/UI adds capacity_loss_cuts, capacity_delay_cuts, capacity_recoveries,
+  oldest_admission_ms. Per-resolver label Reachable reflects authenticated
+  reachability, not a guarantee of application throughput.
+- Android 0.3.1 / versionCode8, same retained signing key. All six Linux binaries
+  rebuilt; server behavior is unchanged and the prior server can stay running.
+
+Validation:
+- Three deterministic regression tests fail on e064927/0.3.0 and pass after fix:
+  read-induced collapse, shared idle recovery, fresh-short-request starvation.
+- Full Go race suite, vet, additional jitter/persistent-write-delay/old-ACK/blocked
+  RX tests. No blanket phone speed/latency guarantee; no physical Oppo test here.
+- Mixed HTTPS fixture opens 26 idle streams, forces all eight budgets to two,
+  injects 60 ms successful-read delay atop heterogeneous 35..120 ms DNS paths,
+  then runs four concurrent workers with two 16 KiB verified TLS uploads and
+  downloads each. Both one- and two-resolver groups pass, as does fixed fallback.
+  A single old-version mixed run also passes; this fixture is a broad regression
+  check, not a complete reproduction of the user's exact 33-second failure.
+- New/old, old/new and new/new byte-verified 32 KiB HTTP interoperability.
+- Signed APK build/lint, native/JNI both ABIs, original certificate, 16 KiB ELF/ZIP
+  alignment and all artifact SHA checks. Evidence in dist/validation; prior
+  0.3.0 data under validation/0.3.0; do not overwrite its raw benchmark history.
+
+Production t.atmosl.ink -> ns2.atmosl.ink ->136.148.220.253. Preserve env/systemd
+public-IP override. Git checkout can be detached; git pull --ff-only origin main.
+For this fix install APK over existing app; no server update is required from
+0.3.0. Matching server/client/scanner binaries are also published for completeness.
+After update, adaptive can be re-enabled. Do not require resolver regrouping to
+address this regression; both one- and two-member groups are tested.
+
+Toolchain and cert unchanged: /workspace/toolchains/{go,jdk-21.0.12.1,android};
+GOPATH=gopath,GOCACHE=cache,ANDROID_USER_HOME=android-user,GRADLE_USER_HOME=gradle-cache,
+GRADLE_OFFLINE=1,MULTIDNS_DEBUG_KEYSTORE=/workspace/toolchains/android-user/debug.keystore.
+CertSHA256 28d3a8d227f63d209bbf4575c128a2546e38e7265e95ec2243886ef5bfbc9c54.
+No agents spawned. Cloud runtime skill/status read this turn; policy enforced,
+restricted proxy, no secrets/outbound identities/VPN/TCP grants. Preserve proxy;
+do not inspect credential files. No production secrets exist in this workspace.
+Recovery bundle/source archive/root handoff refreshed after publication.
+Scratch: /workspace/work/multidns-0.3.1-validation. Source-only old baseline:
+/workspace/work/multidns-0.3.0-baseline.
+
+Earlier notes below are historical.
+
 # Version 0.3.0 — 20 October 2026
 
 Current release: see repository HEAD. Previous published source 4e326f2 / 0.2.2.

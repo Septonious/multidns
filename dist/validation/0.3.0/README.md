@@ -1,0 +1,1 @@
+Current evidence: 0.3.0. Historical evidence is preserved in 0.2.2, 0.2.1 and 0.2.0. SHA256SUMS in the parent dist directory covers all seven APK/Linux artifacts. Performance raw files include final and intermediate runs; see docs/PERFORMANCE.md for limits.
