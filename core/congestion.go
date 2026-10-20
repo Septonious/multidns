@@ -13,7 +13,7 @@ import (
 type pathState struct {
 	flight, reads, waiting, limit, successes int
 	wake                                     chan struct{}
-	lastCut                                  time.Time
+	lastCut, lastIdleGrowth                  time.Time
 }
 
 func (c *Client) pathLocked(addr string) *pathState {
@@ -74,7 +74,7 @@ func (c *Client) acquirePath(ctx context.Context, addr string, op byte) (func(),
 		c.adaptiveMu.Lock()
 	}
 }
-func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error) {
+func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error, elapsed time.Duration) {
 	if !c.Profile.Adaptive || (op != opRead && op != opWrite) {
 		return
 	}
@@ -87,7 +87,7 @@ func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error)
 			return
 		}
 		// One reduction per loss episode, rather than one per packet in that burst.
-		if now.Sub(p.lastCut) < 200*time.Millisecond {
+		if now.Sub(p.lastCut) < 200*time.Millisecond || now.Add(-elapsed).Before(p.lastCut) {
 			return
 		}
 		p.limit = max(2, p.limit/2)
@@ -97,6 +97,13 @@ func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error)
 		return
 	}
 	if size <= 0 {
+		// Successful queued polls can recover a recently collapsed path to its
+		// startup budget; idle traffic never inflates it beyond that budget.
+		if p.waiting > 0 && p.limit < max(2, min(8, c.Profile.Window)) && now.Sub(p.lastCut) > time.Second && now.Sub(p.lastIdleGrowth) > time.Second {
+			p.limit++
+			p.lastIdleGrowth = now
+			p.signal()
+		}
 		return
 	} // Empty long-polls do not prove bulk capacity.
 	p.successes++

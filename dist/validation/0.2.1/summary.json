@@ -1,0 +1,45 @@
+{
+  "version": "0.2.1",
+  "android_version_code": 5,
+  "baseline": "a346812 (0.2.0)",
+  "changes": [
+    "Shared per-resolver AIMD data admission and queue-aware scheduling",
+    "RTT variance with conservative safety margin; health probes retain bulk diagnostics",
+    "Case-insensitive DNS questions and authenticated TCP fallback after header-only truncation",
+    "Authenticated server backpressure and read/control reservation",
+    "Best matching Android physical network; complete dark theme",
+    "Logical retry percentage and per-resolver cumulative error categories"
+  ],
+  "capacity_fixture": {
+    "payload_bytes": 32768,
+    "resolver_pair": 2,
+    "resolver_capacity": 8,
+    "delay_ms": 25,
+    "base_window": 32,
+    "adaptive": true,
+    "before": {
+      "seconds": 16.12,
+      "retries": 942,
+      "fixture_drops": 1903
+    },
+    "after": {
+      "seconds": 2.692,
+      "retries": 1,
+      "timeouts": 10,
+      "fixture_drops": 35
+    }
+  },
+  "go_race_tests": "Passed full suite; additional DNS regressions separately passed under race detector",
+  "go_vet": "passed",
+  "android_build_and_lint": "passed",
+  "android_signing": "same certificate as 0.1.2 and 0.2.0; retained key explicitly selected",
+  "android_native": "both JNI ABIs, six ELF LOAD alignments >=16 KiB, APK ZIP alignment verified",
+  "android_device_test": "not run: no physical phone; no successful emulator runtime test claimed",
+  "wire_compatibility": "0.2.1/0.2.0, 0.2.0/0.2.1, 0.2.1/0.2.1 authenticated byte-verified 32 KiB HTTP upload/download passed",
+  "linux": "server/client/scanner CGO-free linux amd64 and arm64",
+  "performance_limit": "Controlled loopback resolver fixtures; no public-network/phone throughput claim or confirmed production retry cause",
+  "android_apk_sha256": "5c7d8461562261b1dabc2cdfc570cc2731e672f17c312008f8fd50aad6ab65ab",
+  "loaded_rtt": "86016 bytes echoed in 9.766s; 40 retries; loaded probe p50=41ms p95=45ms (118 samples)",
+  "measurement_variability": "Recorded capacity runs 2.692\u201313.026 seconds / 1\u20139 retries; slower clean-path runs and additional timeouts retained in variable-run and quiet-confirmation logs. No reliable phone speed multiplier established.",
+  "android_lint": "0 errors, 20 warnings"
+}

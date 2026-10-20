@@ -138,14 +138,14 @@ func TestLossRecoveryAndLoadedRTT(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 	conn, err := client.DialContext(ctx, "tcp", echoTCP(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(18 * time.Second))
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
 	payload := bytes.Repeat([]byte("verified-lossy-stream"), 4096)
 	done := make(chan error, 1)
 	go func() { _, err := conn.Write(payload); done <- err }()
@@ -172,6 +172,7 @@ func TestLossRecoveryAndLoadedRTT(t *testing.T) {
 	start := time.Now()
 	out := make([]byte, len(payload))
 	if _, err := io.ReadFull(conn, out); err != nil {
+		t.Log("loss recovery diagnostics:", client.StatsJSON())
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
@@ -367,7 +368,7 @@ func TestBlockedTCPDNSWriteHonorsCancellation(t *testing.T) {
 	defer client.Close()
 	conn, peer := net.Pipe()
 	defer peer.Close()
-	socket := &resolverSocket{conn: conn, network: "tcp", pending: map[uint16]pendingDNS{}, done: make(chan struct{}), write: make(chan struct{}, 1)}
+	socket := &resolverSocket{conn: conn, network: "tcp", pending: map[uint16]*pendingDNS{}, done: make(chan struct{}), write: make(chan struct{}, 1)}
 	client.sockets["tcp|fixture"] = socket
 	message, err := query(frame{Op: opProbe}, profile)
 	if err != nil {

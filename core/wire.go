@@ -32,8 +32,10 @@ const (
 
 // Optional v1 extension negotiated in opOpen.Seq and its response payload.
 const (
-	opFlush        byte   = 8
-	queuedWriteACK uint32 = 1
+	opFlush              byte   = 8
+	queuedWriteACK       uint32 = 1
+	extendedUploadWindow uint32 = 2
+	largeUploadWindow           = 256
 )
 
 var encoding = base32.StdEncoding.WithPadding(base32.NoPadding)

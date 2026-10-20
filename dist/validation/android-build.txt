@@ -8,26 +8,29 @@ Warning: SDK processing. This version only understands SDK XML versions up to 3 
 > Task :app:javaPreCompileDebug UP-TO-DATE
 > Task :app:checkDebugAarMetadata UP-TO-DATE
 > Task :app:generateDebugResValues UP-TO-DATE
-> Task :app:mapDebugSourceSetPaths
-> Task :app:generateDebugResources
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
 > Task :app:createDebugCompatibleScreenManifests
 > Task :app:extractDeepLinksDebug UP-TO-DATE
-> Task :app:mergeDebugResources
 > Task :app:processDebugMainManifest
-> Task :app:packageDebugResources
-> Task :app:parseDebugLocalResources
 > Task :app:processDebugManifest
 > Task :app:mergeDebugShaders UP-TO-DATE
-> Task :app:processDebugManifestForPackage
 > Task :app:compileDebugShaders NO-SOURCE
 > Task :app:generateDebugAssets UP-TO-DATE
 > Task :app:mergeDebugAssets UP-TO-DATE
 > Task :app:compressDebugAssets UP-TO-DATE
+> Task :app:processDebugManifestForPackage
 > Task :app:desugarDebugFileDependencies UP-TO-DATE
 > Task :app:processDebugJavaRes NO-SOURCE
 > Task :app:mergeDebugJavaResource UP-TO-DATE
-> Task :app:processDebugResources
 > Task :app:checkDebugDuplicateClasses UP-TO-DATE
+> Task :app:mergeExtDexDebug UP-TO-DATE
+> Task :app:mergeLibDexDebug UP-TO-DATE
+> Task :app:processDebugResources
+> Task :app:configureNdkBuildDebug[arm64-v8a]
 
 > Task :app:compileDebugJavaWithJavac
 Note: Some input files use or override a deprecated API.
@@ -35,10 +38,7 @@ Note: Recompile with -Xlint:deprecation for details.
 
 > Task :app:dexBuilderDebug
 > Task :app:mergeDebugGlobalSynthetics UP-TO-DATE
-> Task :app:mergeExtDexDebug UP-TO-DATE
-> Task :app:mergeLibDexDebug UP-TO-DATE
 > Task :app:mergeProjectDexDebug
-> Task :app:configureNdkBuildDebug[arm64-v8a]
 > Task :app:buildNdkBuildDebug[arm64-v8a]
 > Task :app:configureNdkBuildDebug[x86_64]
 > Task :app:buildNdkBuildDebug[x86_64]
@@ -54,14 +54,14 @@ Note: Recompile with -Xlint:deprecation for details.
 > Task :app:extractProguardFiles UP-TO-DATE
 > Task :app:generateDebugLintReportModel
 > Task :app:preDebugUnitTestBuild UP-TO-DATE
-> Task :app:stripDebugDebugSymbols
 > Task :app:generateDebugUnitTestLintModel
+> Task :app:stripDebugDebugSymbols
 > Task :app:packageDebug
 > Task :app:createDebugApkListingFileRedirect
 > Task :app:assembleDebug
-> Task :app:lintAnalyzeDebug
 > Task :app:lintAnalyzeDebugAndroidTest
 > Task :app:lintAnalyzeDebugUnitTest
+> Task :app:lintAnalyzeDebug
 
 > Task :app:lintReportDebug
 Wrote HTML report to file:///workspace/multidns/android/app/build/reports/lint-results-debug.html
@@ -69,7 +69,7 @@ Wrote HTML report to file:///workspace/multidns/android/app/build/reports/lint-r
 > Task :app:lintDebug
 [Incubating] Problems report is available at: file:///workspace/multidns/android/build/reports/problems/problems-report.html
 
-BUILD SUCCESSFUL in 4m
-50 actionable tasks: 31 executed, 19 up-to-date
+BUILD SUCCESSFUL in 2m 25s
+50 actionable tasks: 26 executed, 24 up-to-date
 PASS arm64-v8a: HEV C API and MultiDNS JNI bridge
 PASS x86_64: HEV C API and MultiDNS JNI bridge

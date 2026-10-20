@@ -1,78 +1,118 @@
 {
-  "before": {
+  "BenchmarkAsymmetricPool": {
     "upload": {
-      "seconds": [
-        2.325152809,
-        2.858059741,
-        2.219098668
+      "before_runs": [
+        {
+          "dropped/transfer": 417.0,
+          "probe-p95-ms": 65.52,
+          "queries/transfer": 6471.0,
+          "retries/transfer": 33.0,
+          "seconds": 23.853885624
+        }
       ],
-      "queries": [
-        1432.0,
-        1433.0,
-        1431.0
+      "after_runs": [
+        {
+          "dropped/transfer": 192.0,
+          "probe-p95-ms": 62.72,
+          "queries/transfer": 4276.0,
+          "retries/transfer": 10.0,
+          "seconds": 14.286576555
+        },
+        {
+          "dropped/transfer": 193.0,
+          "probe-p95-ms": 46.67,
+          "queries/transfer": 4407.0,
+          "retries/transfer": 11.0,
+          "seconds": 12.779868767
+        },
+        {
+          "dropped/transfer": 106.0,
+          "probe-p95-ms": 75.88,
+          "queries/transfer": 4226.0,
+          "retries/transfer": 19.0,
+          "seconds": 15.880468759
+        }
       ],
-      "retries": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "median_seconds": 2.325152809
+      "before_seconds": 23.853885624,
+      "after_median_seconds": 14.286576555,
+      "relative_payload_rate": 1.66967121424563
     },
     "download": {
-      "seconds": [
-        0.869359709,
-        0.786351157,
-        0.568061657
+      "before_runs": [
+        {
+          "dropped/transfer": 119.0,
+          "probe-p95-ms": 49.16,
+          "queries/transfer": 1179.0,
+          "retries/transfer": 3.0,
+          "seconds": 3.190616991
+        }
       ],
-      "queries": [
-        247.0,
-        269.0,
-        260.0
+      "after_runs": [
+        {
+          "dropped/transfer": 1.0,
+          "probe-p95-ms": 61.3,
+          "queries/transfer": 616.0,
+          "retries/transfer": 0.0,
+          "seconds": 2.08095896
+        },
+        {
+          "dropped/transfer": 4.0,
+          "probe-p95-ms": 55.72,
+          "queries/transfer": 592.0,
+          "retries/transfer": 0.0,
+          "seconds": 2.116463959
+        },
+        {
+          "dropped/transfer": 3.0,
+          "probe-p95-ms": 46.43,
+          "queries/transfer": 586.0,
+          "retries/transfer": 0.0,
+          "seconds": 1.617328273
+        }
       ],
-      "retries": [
-        15.0,
-        0.0,
-        0.0
-      ],
-      "median_seconds": 0.786351157
+      "before_seconds": 3.190616991,
+      "after_median_seconds": 2.08095896,
+      "relative_payload_rate": 1.5332435921754077
     }
   },
-  "after": {
+  "BenchmarkTunnelTransfer": {
     "upload": {
-      "seconds": [
-        2.231087219,
-        2.219678714,
-        2.265761568
+      "before_runs": [
+        {
+          "queries/transfer": 1425.0,
+          "retries/transfer": 0.0,
+          "seconds": 2.242522459
+        }
       ],
-      "queries": [
-        1424.0,
-        1423.0,
-        1429.0
+      "after_runs": [
+        {
+          "queries/transfer": 788.0,
+          "retries/transfer": 0.0,
+          "seconds": 1.629074596
+        }
       ],
-      "retries": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "median_seconds": 2.231087219
+      "before_seconds": 2.242522459,
+      "after_median_seconds": 1.629074596,
+      "relative_payload_rate": 1.3765621687958602
     },
     "download": {
-      "seconds": [
-        0.467917797,
-        0.497374704,
-        0.447046281
+      "before_runs": [
+        {
+          "queries/transfer": 258.0,
+          "retries/transfer": 0.0,
+          "seconds": 0.544132175
+        }
       ],
-      "queries": [
-        255.0,
-        255.0,
-        246.0
+      "after_runs": [
+        {
+          "queries/transfer": 157.0,
+          "retries/transfer": 0.0,
+          "seconds": 0.395528217
+        }
       ],
-      "retries": [
-        0.0,
-        0.0,
-        0.0
-      ],
-      "median_seconds": 0.467917797
+      "before_seconds": 0.544132175,
+      "after_median_seconds": 0.395528217,
+      "relative_payload_rate": 1.3757101304355233
     }
   }
 }

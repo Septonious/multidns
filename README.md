@@ -24,7 +24,8 @@ multidns-client -profile profile.json -listen 127.0.0.1:1080
 
 The server and profile must use the same key. No key is shipped in the APK.
 The CLI provides a SOCKS5 endpoint; Android wraps it in a VpnService.
-Resolver groups duplicate requests within a group and stripe work across groups.
+In adaptive mode groups race controls, hedge data requests, and distribute unique
+bulk work across members and groups. Fixed scheduling retains group duplication.
 Each stream uses independent sequence numbers and a bounded retransmission window.
 Resolver failover preserves destination connections while server stream state lives.
 Switching independent servers creates a new session.
@@ -42,12 +43,11 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.2.1 adds a complete
-dark theme, per-resolver congestion control, detailed retry diagnostics, robust
-DNS reply handling, server backpressure, and stable physical-network selection.
-Adaptive scheduling must be enabled to use the learned resolver budgets. Update
-both the server binary and APK. Existing profiles and keys are preserved when
-installing the APK as an update.
+amd64/arm64 server, client, and scanner binaries. Version 0.2.2 distributes unique
+bulk work across group members, uses delayed backup requests, accounts for canceled
+queries still on the wire, and negotiates larger upload windows. The dark theme
+and existing profiles remain supported. Enable adaptive scheduling and update
+both server and APK; older peers safely use the smaller upload window.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
 

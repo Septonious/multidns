@@ -19,6 +19,7 @@ type ResolverHealth struct {
 	SocketErrors   uint64    `json:"socket_errors"`
 	LastError      string    `json:"last_error,omitempty"`
 	Capacity       int       `json:"capacity"`
+	WireInFlight   int       `json:"wire_in_flight"`
 	Queued         int       `json:"queued"`
 	RTTVarianceMS  float64   `json:"rtt_variance_ms"`
 	Endpoint       string    `json:"endpoint"`
@@ -75,6 +76,7 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 		copy := *h
 		if p := c.paths[h.Endpoint]; p != nil {
 			copy.Capacity = p.limit
+			copy.WireInFlight = p.flight
 			copy.Queued = p.waiting
 		}
 		out = append(out, copy)
@@ -129,7 +131,7 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		return
 	}
 	h.Checked = time.Now()
-	c.updateCapacityLocked(addr, size, op, err)
+	c.updateCapacityLocked(addr, size, op, err, elapsed)
 	if err != nil {
 		h.Failures++
 		h.LastError = failureSummary(err)
@@ -226,7 +228,7 @@ func (c *Client) chooseGroup(base int, bulk bool, operation ...byte) int {
 				}
 				throughput = capacity * 1000 / math.Max(rtt, 1)
 			}
-			rate = math.Max(rate, throughput/(1+float64(pending)/float64(capacity)))
+			rate += throughput * float64(capacity) / (1 + float64(pending)/float64(capacity))
 		}
 		if cost < bestCost {
 			bestCost = cost

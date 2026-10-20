@@ -19,6 +19,12 @@ func testDNS(t testing.TB, handler dns.Handler) string {
 	if e != nil {
 		t.Fatal(e)
 	}
+	// Match the production listener so deliberate loss fixtures, rather than
+	// small loopback kernel buffers, determine packet loss under the race detector.
+	if udp, ok := pc.(*net.UDPConn); ok {
+		_ = udp.SetReadBuffer(1 << 20)
+		_ = udp.SetWriteBuffer(1 << 20)
+	}
 	s := &dns.Server{PacketConn: pc, Handler: handler}
 	go s.ActivateAndServe()
 	t.Cleanup(func() { s.Shutdown() })

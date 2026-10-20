@@ -1,3 +1,69 @@
+# Version 0.2.2 — 20 October 2026
+
+User reported poor real-phone throughput: 1.25 Mbit/s down / 0.27 Mbit/s up,
+54 ms ping, four automatic pairs. Snapshot: 47 retries / 71894 attempts (0.065%),
+225 observed timeouts / 113740 resolver attempts, 26 socket errors all on
+94.25.113.230; slower paths at ~157/204 ms. No authentication or DNS errors.
+Current authorized scope continues transport optimization and delivery of matching
+APK/Linux binaries to GitHub; prior authorization to publish persists.
+
+Implemented after c609770 / 0.2.1:
+- Adaptive data uses weighted primaries plus delayed backup rather than duplicating
+  every chunk. Both members can carry unique bulk work; control races immediately.
+  Short data requests prefer expected latency. Failed primaries start backups early.
+- Group/member weighting includes learned parallelism, queues and directional
+  per-exchange service rates. These rates are not measured aggregate goodput.
+- Cancellation does not cancel a recursor's wire request. Keep transaction IDs and
+  adaptive path/shared capacity leased until response, expiry or reset. New
+  wire_in_flight diagnostics show leased budget, including shared-slot admission.
+  Fixed scheduling keeps its previous request/window limits.
+- Negotiate 256-chunk upload bound via optional Open bit 1; old peers retain 64.
+  Existing queued ACK/flush delivery semantics and v1 header are unchanged.
+  Adaptive windows grow after warm-up using aggregate credits; reads cap at 64
+  including unread application data, and consumption wakes blocked prefetch.
+- Adaptive shared bounds: 256 total, 240 data, 160 read (16 reserved control).
+  Fixed mode retains 128/120/96. Idle reads re-evaluate groups after WAIT; successful
+  queued idle polls restore collapsed budgets toward initial level, at most 1/s.
+  Old in-flight losses cannot repeatedly halve a newly reduced budget.
+- Diagnostics: transport_version=0.2.2, hedges=backup attempts, peer_upload_window
+  (256 confirms updated server; 64 fallback). Dark UI/signing/profiles retained.
+- APK versionCode 6. All six Linux binaries rebuilt. Retained certificate below.
+
+Validation: full go test -race ./... and go vet passed. Regression tests cover
+unique member use, hedge recovery, late reply credit retention, 256 queue bounds
+and flush ordering, legacy 64 bounds, backpressure, loss recovery, stop/reset and
+TCP fallback. Test UDP buffers now match production 1 MiB. On this two-CPU host,
+backpressure/loss race-test deadlines are 20/30s, with byte/progress checks intact.
+Updated/previous and previous/updated endpoints byte-verify 32 KiB HTTP transfers.
+Final evidence: one 0.2.1 baseline versus three 0.2.2 mixed-pool runs: upload
+23.854s -> median 14.287s (1.67x), download 3.191s -> median 2.081s (1.53x).
+Repeated probe p95 46..76ms; earlier upload 21.489s/p95 313ms retained as variance.
+Clean benchmark: upload 2.243s -> 1.629s, download .544s -> .396s, zero retries.
+Android build/lint/native/JNI/ELF/ZIP/signature/cert/SHA checks passed; no physical
+phone test claimed. Retained certificate confirmed for 0.2.2 / versionCode 6.
+Measurement evidence is in dist/validation; historical evidence is under 0.2.1
+and 0.2.0. Mixed 4x2 fixture includes fourteen idle streams, asymmetric 44..204ms
+paths, and explicit eight-request per-path capacity. Timings vary; do not claim
+phone speed improvements from loopback fixtures. Physical Oppo runtime test is
+not available here. Current builds must be installed and tested on the user's link.
+
+Production remains t.atmosl.ink via ns2.atmosl.ink -> 136.148.220.253. No SSH/key
+here. Preserve /etc/multidns/server.env and public-IP systemd override. User's Git
+checkout may be detached: git pull --ff-only origin main (explicit branch).
+Atomic install dist/multidns-server-linux-amd64 as /usr/local/bin/multidns-server.new,
+rename over /usr/local/bin/multidns-server, then systemctl restart/status multidns.
+Install signed APK as update, keep adaptive scheduling and base window 8 for the
+first comparison, and retain the same resolver pool to isolate the transport change.
+
+Build toolchain: /workspace/toolchains/{go,jdk-21.0.12.1,android}; GOPATH=gopath,
+GOCACHE=cache, ANDROID_USER_HOME=android-user, GRADLE_USER_HOME=gradle-cache,
+GRADLE_OFFLINE=1, MULTIDNS_DEBUG_KEYSTORE=/workspace/toolchains/android-user/debug.keystore.
+Certificate SHA256: 28d3a8d227f63d209bbf4575c128a2546e38e7265e95ec2243886ef5bfbc9c54.
+Do not print/commit the private store, credential values or production env file.
+No agents were spawned; current developer rules prohibit unsolicited delegation.
+
+Earlier notes below are historical.
+
 # Version 0.2.1 — 20 October 2026
 
 Current authorized work: investigate very high retry counts, fix/optimize transport,

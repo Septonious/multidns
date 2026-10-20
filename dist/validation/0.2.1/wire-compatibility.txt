@@ -1,0 +1,3 @@
+PASS new client / old server: authenticated startup and byte-verified 32 KiB HTTP upload/download
+PASS old client / new server: authenticated startup and byte-verified 32 KiB HTTP upload/download
+PASS new client / new server: authenticated startup and byte-verified 32 KiB HTTP upload/download

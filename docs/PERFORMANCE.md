@@ -1,6 +1,86 @@
 # Performance and tuning
 
-## Version 0.2.1: retries and resolver congestion
+## Version 0.2.2: useful parallelism and wire occupancy
+
+The user's 0.2.1 snapshot shows 47 logical retries in 71,894 attempts (0.065%),
+225 physical timeouts in 113,740 resolver attempts (0.198%), no DNS/authentication
+errors, and all 26 socket errors on 94.25.113.230. Throughput was 1.25 Mbit/s down
+and 0.27 Mbit/s up with four pairs; probe RTT was 54 ms. Those are user-reported
+measurements. The counters do not establish the socket error's underlying errno,
+or an independent sustained capacity for each of the eight addresses.
+
+Several client limits wasted useful capacity even with low logical loss:
+
+- Bulk scheduling treated payload/time for a single reply as aggregate resolver
+  capacity. It now weights that service rate by learned parallelism and queue
+  depth, and adds the capacity of members carrying independent bulk work.
+- Adaptive data requests select a primary and delay the backup. Bulk primaries
+  are weighted across members; short data operations prefer lower expected latency.
+  Controls still race immediately. A failing primary starts the backup early;
+  idle read hedges allow the server's 80 ms wait. Healthy traffic avoids sending
+  two copies of every chunk while retaining fallback.
+- Canceling a race does not cancel a query already running on a recursor. The
+  socket now retains its transaction until a matching reply, expiry, or reset.
+  Adaptive path and shared budgets remain occupied for that wire lifetime.
+  Diagnostics add `wire_in_flight`, the leased resolver budget: it includes
+  admission to shared slots and canceled wire requests, and can exceed active
+  RPC `in_flight`.
+- Adaptive windows follow aggregate learned credits after warm-up, capped at 64
+  download chunks and 256 upload chunks on a supporting server. Open bit 1
+  negotiates the larger upload reorder bound; old peers retain 64. The existing
+  queued-ACK/flush delivery guarantee is preserved. No v1 header changes.
+- Download prefetch includes unread application buffers in its 64-chunk credit
+  bound and wakes when the application consumes a chunk. Adaptive shared limits
+  are 256 total / 240 data / 160 reads, leaving 16 control positions. Fixed mode
+  retains its prior 128 / 120 / 96 limits and configured stream window.
+- Idle head reads re-evaluate placement after WAIT. Queued successful idle polls
+  can restore a collapsed path toward its startup budget, at most one credit per
+  second; they cannot grow it above that startup level. Losses from requests sent
+  before an earlier cut do not repeatedly halve the new budget.
+
+`goodput_bytes_per_second` and directional rate fields remain **per-exchange
+service estimates**, not measured aggregate resolver bandwidth. `hedges` counts
+delayed backup resolver exchange attempts. `peer_upload_window` reports the largest negotiated
+upload bound observed in this client session: 256 confirms the updated server;
+64 indicates fallback. `transport_version` identifies this transport build.
+
+### Mixed-path measurement
+
+`BenchmarkAsymmetricPool` checks a 262,144-byte HTTP payload through four pairs,
+44/54, 44/84, 46/157, and 51/204 ms delays, eight simultaneous data requests per
+resolver, fourteen idle TCP streams, and one path initially reduced to two credits.
+Upload is verified by a SHA-256 response; download is compared byte for byte.
+Concurrent authenticated probes measure loaded control latency.
+
+| Direction | 0.2.1 baseline | 0.2.2 median (3 runs) | Relative payload rate |
+|---|---:|---:|---:|
+| Upload | 23.854 s | 14.287 s | 1.67× |
+| Download | 3.191 s | 2.081 s | 1.53× |
+
+The final repeated run's probe p95 values ranged from 46–76 ms. An earlier updated
+upload took 21.489 s with a 313 ms probe p95; that outlier is retained in
+`performance-first-after.txt`. The clean 5×2 benchmark measured 2.243 → 1.629 s
+upload and 0.544 → 0.396 s download, each with zero retries. These are short fixture
+measurements; the baseline mixed-pool table has one run, not a statistical claim
+of a universal speed multiplier.
+
+Raw before/after results and diagnostic snapshots are in `dist/validation`.
+They are controlled tests, not a prediction of phone speeds. Earlier prototypes
+that did not improve throughput were discarded. Different public resolver IPs
+may still share infrastructure, upstream bandwidth, or per-domain rate limits.
+The fixture models in-flight limits rather than proving any provider's actual
+limits. Compare the same pool before changing candidates.
+
+The race tests use 1 MiB DNS socket buffers, matching the production listener.
+The large backpressure and correlated-loss fixtures allow 20/30 seconds under the
+race detector on this two-CPU host; their byte-integrity and progress assertions
+remain intact. These time bounds are test deadlines, not client timeout defaults.
+
+Install both matching APK and server, enable adaptive scheduling, and start with
+base window 8. Keep the existing resolver pool for the first comparison. Preserve
+the server environment file and install the APK as an update to keep profiles.
+
+## Historical 0.2.1: retries and resolver congestion
 
 Low probe latency does not establish a resolver's sustained capacity. The previous
 client enlarged stream windows without reducing requests to an overloaded resolver.

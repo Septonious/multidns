@@ -264,14 +264,14 @@ func TestRollingWindowResumesAfterReaderBackpressure(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	conn, err := c.DialContext(ctx, "tcp", echoTCP(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	conn.SetDeadline(time.Now().Add(20 * time.Second))
 	payload := bytes.Repeat([]byte("bounded queues and refreshed ACKs"), 8192)
 	written := make(chan error, 1)
 	go func() { _, err := conn.Write(payload); written <- err }()

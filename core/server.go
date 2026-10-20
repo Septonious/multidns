@@ -18,22 +18,23 @@ type streamKey struct {
 	stream  uint32
 }
 type serverStream struct {
-	mu        sync.Mutex
-	conn      net.Conn
-	network   string
-	udpBuffer []byte
-	ready     chan struct{}
-	notify    chan struct{}
-	err       error
-	nextWrite uint32
-	writes    map[uint32][]byte
-	chunks    map[uint32][]byte
-	nextRead  uint32
-	eof       bool
-	closed    bool
-	last      time.Time
-	readSize  int
-	queuedACK bool
+	mu         sync.Mutex
+	conn       net.Conn
+	network    string
+	udpBuffer  []byte
+	ready      chan struct{}
+	notify     chan struct{}
+	err        error
+	nextWrite  uint32
+	writes     map[uint32][]byte
+	chunks     map[uint32][]byte
+	nextRead   uint32
+	eof        bool
+	closed     bool
+	last       time.Time
+	readSize   int
+	queuedACK  bool
+	writeLimit uint32
 }
 type Server struct {
 	Domain, Key string
@@ -113,6 +114,9 @@ func (s *Server) handle(f frame) []byte {
 			return []byte{statusError}
 		}
 		st = &serverStream{ready: make(chan struct{}), notify: make(chan struct{}), writes: map[uint32][]byte{}, chunks: map[uint32][]byte{}, last: time.Now(), readSize: s.readSize, queuedACK: f.Seq&queuedWriteACK != 0}
+		if st.queuedACK && f.Seq&extendedUploadWindow != 0 {
+			st.writeLimit = largeUploadWindow
+		}
 		s.streams[k] = st
 		go st.open(f.Data)
 	}
@@ -147,7 +151,11 @@ func (s *Server) handle(f frame) []byte {
 	switch f.Op {
 	case opOpen:
 		if st.queuedACK {
-			return []byte{statusOK, byte(queuedWriteACK)}
+			capabilities := byte(queuedWriteACK)
+			if st.writeLimit == largeUploadWindow {
+				capabilities |= byte(extendedUploadWindow)
+			}
+			return []byte{statusOK, capabilities}
 		}
 		return []byte{statusOK}
 	case opWrite:
@@ -157,7 +165,7 @@ func (s *Server) handle(f frame) []byte {
 		if f.Seq < st.nextWrite {
 			return []byte{statusOK}
 		}
-		if f.Seq-st.nextWrite >= 64 {
+		if f.Seq-st.nextWrite >= max(64, st.writeLimit) {
 			return []byte{statusWait}
 		}
 		if _, ok := st.writes[f.Seq]; !ok {

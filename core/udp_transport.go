@@ -14,12 +14,15 @@ import (
 type pendingDNS struct {
 	question string
 	reply    chan *dns.Msg
+	done     chan struct{}
+	timer    *time.Timer
+	err      error
 }
 type resolverSocket struct {
 	conn    net.Conn
 	mu      sync.Mutex
 	next    uint16
-	pending map[uint16]pendingDNS
+	pending map[uint16]*pendingDNS
 	network string
 	write   chan struct{}
 	done    chan struct{}
@@ -62,7 +65,7 @@ func (c *Client) socket(ctx context.Context, addr, network string) (*resolverSoc
 		_ = udp.SetReadBuffer(1 << 20)
 		_ = udp.SetWriteBuffer(1 << 20)
 	}
-	s := &resolverSocket{conn: conn, network: network, pending: map[uint16]pendingDNS{}, done: make(chan struct{}), write: make(chan struct{}, 1)}
+	s := &resolverSocket{conn: conn, network: network, pending: map[uint16]*pendingDNS{}, done: make(chan struct{}), write: make(chan struct{}, 1)}
 	c.socketsMu.Lock()
 	defer c.socketsMu.Unlock()
 	if c.ctx.Err() != nil || epoch != c.socketsEpoch {
@@ -81,7 +84,31 @@ func (c *Client) socket(ctx context.Context, addr, network string) (*resolverSoc
 	go s.readLoop()
 	return s, nil
 }
-func (s *resolverSocket) close() { s.once.Do(func() { close(s.done); s.conn.Close() }) }
+func (s *resolverSocket) close() {
+	s.once.Do(func() {
+		close(s.done)
+		s.conn.Close()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for id, p := range s.pending {
+			s.finishLocked(id, p, nil, net.ErrClosed)
+		}
+	})
+}
+func (s *resolverSocket) finishLocked(id uint16, p *pendingDNS, m *dns.Msg, err error) {
+	if s.pending[id] != p {
+		return
+	}
+	delete(s.pending, id)
+	if p.timer != nil {
+		p.timer.Stop()
+	}
+	p.err = err
+	if m != nil {
+		p.reply <- m
+	}
+	close(p.done)
+}
 func (s *resolverSocket) readLoop() {
 	defer s.close()
 	buffer := make([]byte, 4096)
@@ -112,12 +139,9 @@ func (s *resolverSocket) readLoop() {
 		// DNS names are case-insensitive. Some recursors normalize case.
 		// A header-only TC reply is permitted to request TCP fallback; only
 		// the subsequent fully authenticated response can complete the RPC.
-		match := len(m.Question) == 1 && m.Question[0].Qtype == dns.TypeTXT && m.Question[0].Qclass == dns.ClassINET && strings.EqualFold(p.question, m.Question[0].Name)
+		match := ok && len(m.Question) == 1 && m.Question[0].Qtype == dns.TypeTXT && m.Question[0].Qclass == dns.ClassINET && strings.EqualFold(p.question, m.Question[0].Name)
 		if ok && (match || len(m.Question) == 0 && m.Truncated) {
-			select {
-			case p.reply <- m:
-			default:
-			}
+			s.finishLocked(m.Id, p, m, nil)
 		}
 		s.mu.Unlock()
 	}
@@ -126,12 +150,21 @@ func (c *Client) exchangeUDP(ctx context.Context, m *dns.Msg, addr string) (*dns
 	return c.exchangeDNS(ctx, m, addr, "udp")
 }
 
+var finishedDNS = func() <-chan struct{} { done := make(chan struct{}); close(done); return done }()
+
 func (c *Client) exchangeDNS(ctx context.Context, m *dns.Msg, addr, network string) (*dns.Msg, error) {
+	reply, err, _ := c.exchangeDNSTracked(ctx, m, addr, network)
+	return reply, err
+}
+
+// Cancellation stops waiting for a reply, not the request already being handled
+// by a recursor. Retain its transaction and capacity lease until wire completion.
+func (c *Client) exchangeDNSTracked(ctx context.Context, m *dns.Msg, addr, network string) (*dns.Msg, error, <-chan struct{}) {
 	s, e := c.socket(ctx, addr, network)
 	if e != nil {
-		return nil, e
+		return nil, e, finishedDNS
 	}
-	reply := make(chan *dns.Msg, 1)
+	p := &pendingDNS{question: m.Question[0].Name, reply: make(chan *dns.Msg, 1), done: make(chan struct{})}
 	var id uint16
 	found := false
 	s.mu.Lock()
@@ -145,45 +178,64 @@ func (c *Client) exchangeDNS(ctx context.Context, m *dns.Msg, addr, network stri
 	}
 	if !found {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("DNS transaction space exhausted")
+		return nil, fmt.Errorf("DNS transaction space exhausted"), finishedDNS
 	}
-	s.pending[id] = pendingDNS{m.Question[0].Name, reply}
+	select {
+	case <-s.done:
+		s.mu.Unlock()
+		return nil, net.ErrClosed, finishedDNS
+	default:
+	}
+	s.pending[id] = p
 	s.mu.Unlock()
-	defer func() { s.mu.Lock(); delete(s.pending, id); s.mu.Unlock() }()
+	sent := false
+	defer func() {
+		if !sent {
+			s.mu.Lock()
+			s.finishLocked(id, p, nil, net.ErrClosed)
+			s.mu.Unlock()
+		}
+	}()
 	m = m.Copy()
 	m.Id = id
 	select {
 	case s.write <- struct{}{}:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, ctx.Err(), p.done
 	case <-c.ctx.Done():
-		return nil, net.ErrClosed
+		return nil, net.ErrClosed, p.done
 	case <-s.done:
-		return nil, net.ErrClosed
+		return nil, net.ErrClosed, p.done
 	}
-	deadline := time.Now().Add(c.exchangeTimeout(addr, opRead))
+	timeout := c.exchangeTimeout(addr, opRead)
+	deadline := time.Now().Add(timeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
+	s.mu.Lock()
+	p.timer = time.AfterFunc(timeout, func() { s.mu.Lock(); s.finishLocked(id, p, nil, context.DeadlineExceeded); s.mu.Unlock() })
+	s.mu.Unlock()
+	sent = true
 	_ = s.conn.SetWriteDeadline(deadline)
 	e = (&dns.Conn{Conn: s.conn}).WriteMsg(m)
 	<-s.write
 	if e != nil {
 		s.close()
-		return nil, e
+		return nil, e, p.done
 	}
-	timer := time.NewTimer(c.exchangeTimeout(addr, opRead))
-	defer timer.Stop()
 	select {
-	case answer := <-reply:
-		return answer, nil
+	case answer := <-p.reply:
+		return answer, nil, p.done
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, ctx.Err(), p.done
 	case <-c.ctx.Done():
-		return nil, net.ErrClosed
-	case <-s.done:
-		return nil, net.ErrClosed
-	case <-timer.C:
-		return nil, context.DeadlineExceeded
+		return nil, net.ErrClosed, p.done
+	case <-p.done:
+		select {
+		case answer := <-p.reply:
+			return answer, nil, p.done
+		default:
+			return nil, p.err, p.done
+		}
 	}
 }

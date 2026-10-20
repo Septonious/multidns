@@ -739,8 +739,8 @@ public final class MainActivity extends Activity {
     window.setInputType(InputType.TYPE_CLASS_NUMBER);
     text(
             tuning,
-            "During sustained traffic, adaptive mode can expand this base window up to 64. Shared"
-                + " limits keep room for control traffic.")
+            "Adaptive mode expands this window for sustained traffic while limiting each resolver"
+                + " to its learned capacity. Start at 8.")
         .setTextColor(Ui.MUTED);
     button(
         page,
