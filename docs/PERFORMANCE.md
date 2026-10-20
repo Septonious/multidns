@@ -1,5 +1,81 @@
 # Performance and tuning
 
+## Version 0.3.3: upload ACK clock, pacing and loss tolerance
+
+The user's 0.3.2 phone measurement improved to 4.78 Mbps down / 0.60 Mbps up,
+87 ms idle ping and 189/201 ms download/upload-loaded ping. Shared admission was
+empty; resolver queue EWMA was about 1–25 ms. The four fast 31.131 paths recorded
+529 timeouts in 30806 attempts (~1.72%), yet repeatedly halved useful capacity.
+These are user measurements of 0.3.2, not results for 0.3.3.
+
+Changes retain the wire format and 0.3.0+ server compatibility:
+
+- Upload losses now use a write-only ACK clock. The UDP implementation previously
+  hardcoded the read timeout for every operation. Known healthy writes now use
+  max(160 ms,2*ACK_RTT+max(25 ms,4*ACK_variation)), bounded by the profile timeout.
+  Read recovery retains an 80 ms server-wait allowance and a 200 ms floor. Unknown
+  paths retain the configured timeout. Idle/stalled write clocks expire; a failed
+  read or isolated lost write does not discard contemporaneous upload progress.
+- Sparse loss (<=4% of the last 128 observed data outcomes, with at least 64 samples
+  and acceptable ACK RTT) cuts capacity by about 1/8, at most once per 500 ms.
+  Unknown/high loss still halves capacity. Three losses within one ACK clock
+  can escalate a mild cut once, before its cooldown expires. This avoids treating
+  a hard resolver capacity limit as independent random loss. Initial canaries, quarantine, ARQ,
+  packet identity and physical wire-credit retention remain intact. Canceled
+  attempts are excluded from these outcome samples.
+- Payload ACKs grow by one credit per capacity-sized success batch, rather than
+  two. Auto capacity can reach 64; per-path RX remains 32. Configured TX/RX limits
+  still apply. A single sustained upload can use the full negotiated 256-position
+  reorder budget within the shared 240-data-exchange budget, instead of a 128 cap.
+- Bulk writes are paced by ACK_RTT/capacity (minimum 100 microseconds), with leases
+  retained while waiting. Short writes and controls bypass pacing. Canceled
+  paced sends release credits and cannot leave an unbounded future-send queue.
+- The default loaded_rtt_limit_ms is 500 (range 100..2000). The controller halves
+  capacity when smoothed write ACK RTT exceeds (budget-80)/2; growing variance
+  cannot mask this guard. Existing latency_target_ms remains a softer per-path
+  queue target. This approximation cannot bound destination RTT, VPN-stack
+  buffering or every loss/failover outlier; final phone measurement is required.
+- A paired group's backup count no longer grows when its primary is admitted on
+  another group's resolver. This avoids an unintended third copy of a chunk.
+- Tuning probes TX up to 64, RX up to 32. A fully received but latency-inflated
+  concurrency trial is repeated once; persistent delay or packet loss still stops
+  growth. Both attempts are retained in the report, with repeated=true.
+
+The new benchmark isolates upload: four concurrent 128 KiB sinks return SHA-256
+only after receiving each complete payload. An application echo and 26 idle TCP
+sessions share eight 35..90 ms DNS paths. Every 71st data query is deliberately
+lost per resolver. The queued case adds 8 ms for each concurrent request above 8.
+Controls incur the path delay too; echo includes Write/Flush/Read application I/O.
+Each row records one byte-verified 512 KiB upload batch, not phone throughput.
+
+Quiet sequential comparison on this two-CPU workspace (one baseline batch and
+ two final batches per case):
+
+| Queued | Version | Upload time (s) | Upload (Mbps) | Echo p95 (ms) | Echo p99 (ms) | Slowest echo (ms) | Samples | Retries |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| No | 0.3.2 | 11.41 | 0.368 | 236.6 | 434.6 | 461.3 | 79 | 86 |
+| No | 0.3.3 | 3.71 | 1.130 | 191.6 | 295.7 | 303.1 | 28 | 78 |
+| No | 0.3.3 | 5.00 | 0.839 | 197.8 | 260.6 | 384.3 | 35 | 75 |
+| Yes | 0.3.2 | 11.81 | 0.355 | 240.8 | 557.5 | 715.4 | 78 | 88 |
+| Yes | 0.3.3 | 6.80 | 0.617 | 343.8 | 443.1 | 781.7 | 38 | 113 |
+| Yes | 0.3.3 | 6.12 | 0.685 | 189.7 | 262.2 | 349.1 | 39 | 78 |
+
+The final code improved completion time by2.3–3.1x without the simulated queue,
+and1.7–1.9x with it. Final p99 stayed below444 ms; one of140 application echoes
+reached781.7 ms during recovery. This is explicitly not a guaranteed500 ms
+worst-case bound. Earlier candidates and their failed/slow runs are retained too;
+do not cite an earlier candidate's425 ms maximum as the final build's maximum.
+All payload digests matched. No0.3.3 phone throughput was measured here.
+
+Regression checks cover sparse loss versus clustered loss, hard ACK-budget cuts
+that cannot be masked by variance, directional on-wire timeout, expiration of
+stale clocks after stopped progress, full negotiated upload-window use and
+cancellation without credit leaks. The hard8-concurrent-request resolver fixture
+passes three race-instrumented repetitions after adding burst escalation; an
+intermediate version exceeded its retry bound (26 versus25) and is retained.
+The tuner fixture injects one fully received latency spike;0.3.2 stops atRX1,
+while0.3.3 confirms it and still discovers the2..4-worker usable range.
+
 ## Version 0.3.2: many-stream queueing and group-independent controls
 
 The user's 0.3.1 snapshot showed 333 shared waiting requests, about 400 ms

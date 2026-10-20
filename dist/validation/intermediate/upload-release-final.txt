@@ -1,0 +1,10 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Septonious/multidns/core
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkUploadLoadedRTT/queue-false-2         	       1	5926782957 ns/op	   0.09 MB/s	       879.1 app-max-ms	       145.0 app-p95-ms	       208.5 app-p99-ms	        44.00 app-samples	      6072 queries	       153.0 retries	       158.0 timeouts
+BenchmarkUploadLoadedRTT/queue-false-2         	       1	3827173427 ns/op	   0.14 MB/s	       225.1 app-max-ms	       168.8 app-p95-ms	       211.8 app-p99-ms	        32.00 app-samples	      5746 queries	        55.00 retries	        63.00 timeouts
+BenchmarkUploadLoadedRTT/queue-true-2          	       1	5969581749 ns/op	   0.09 MB/s	       327.1 app-max-ms	       174.3 app-p95-ms	       192.1 app-p99-ms	        39.00 app-samples	      5933 queries	        76.00 retries	        76.00 timeouts
+BenchmarkUploadLoadedRTT/queue-true-2          	       1	6003767280 ns/op	   0.09 MB/s	       236.9 app-max-ms	       183.9 app-p95-ms	       192.1 app-p99-ms	        40.00 app-samples	      5933 queries	        73.00 retries	        76.00 timeouts
+PASS
+ok  	github.com/Septonious/multidns/core	29.207s

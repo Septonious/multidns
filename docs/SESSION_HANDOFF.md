@@ -1,3 +1,76 @@
+# Version 0.3.3 — 20 October 2026
+
+Current release: repository HEAD. Previous published checkpoint f 4f 9e 06 / 0.3.2.
+User phone result: 4.78 Mbps down / 0.60 Mbps up, idle ping 87 ms,
+download/upload-loaded ping 189/201 ms. Admission queue was empty. They requested
+more upload throughput while keeping loaded RTT below 500 ms. Four fast 31.131
+paths logged 529 timeouts /30806 attempts (~1.72%); repeated halving limited TX.
+No new physical Oppo measurement is available here.
+
+Implementation:
+- UDP exchange had hardcoded opRead for every operation's timeout. Pass the
+  actual operation. Healthy writes use the write-only ACK clock, floor 160 ms,
+  2*RTT+max(25 ms,4*variation), with the configured timeout still the ceiling.
+  Reads use a 200 ms floor and 80 ms server-wait allowance. Unknown/failing paths
+  keep the full configured timeout.
+- Fresh upload ACKs survive isolated read/write loss. A stopped write stream
+  invalidates its clock; old clocks expire after 10 s. This prevents recovery or
+  physical-route changes from continually using a stale short timeout.
+- Sparse loss (<=4% among last 128 observed data outcomes, >=64 samples, low ACK
+  RTT) reduces by about 1/8 instead of halving, with 500 ms cooldown. Three losses
+  within one ACK clock can escalate a mild cut once immediately. Unknown/high
+  loss still halves; old in-flight ACKs cannot immediately undo cuts.
+- Grow one credit per capacity-sized payload success batch, rather than two.
+  Auto combined capacity can reach 64, RX remains capped 32. Manual TX max 64,
+  RX max 32. Full negotiated upload window 256 can now be used within shared 240
+  data slots. Legacy server 64-position limits and per-flow fairness remain.
+- Bulk writes pace at ACK_RTT/capacity, minimum 100 us; short writes/controls skip
+  pacing. Leases remain held while waiting; cancellation releases them and
+  bounds future-send backlog. Group backup count cannot silently gain a third
+  copy when the primary comes from another group.
+- Optional loaded_rtt_limit_ms defaults 500, range 100..2000. Write ACK RTT above
+  (budget-80)/2 causes a strong cut even with high variance. Existing softer
+  latency_target_ms default 30 is preserved, including existing explicit values.
+  This is feedback, not a worst-case bound on Internet/VPN/failure latency.
+- Stats add upload_payload_bytes, loaded_rtt_limit_ms, recent_loss_percent,
+  paced_queries, pacing_wait_ms, capacity_budget_cuts. UI exposes the budget and
+  TX 0..64, plus counters. Tuning tests TX 48/64; fully received latency-only
+  failures repeat once, retaining both trials (repeated=true). Packet loss or
+  persistent delay still stops the concurrency sweep.
+
+Validation:
+- Full final Go race suite and vet pass. Hard 8-request-capacity fixture passes
+  three race-instrumented repeats; intermediate code had 26 retries against a 25
+  bound, prompting the burst escalation fix. Failed logs are retained.
+- Tuner's deterministic 60 ms latency-spike fixture fails on 0.3.2 (RX 1) and passes
+  after confirmation. The earlier full race run found this sensitivity too.
+- Targeted upload/controller tests and burst escalation cover directional
+  timeout on the real UDP path, stale-clock recovery, sparse/burst distinction,
+  variance-resistant budget guard, full negotiated credit, cancellation leases.
+- Byte-verified upload benchmark: four 128 KiB sink transfers returning SHA-256,
+  separate application echo,26 idle streams,8 DNS paths 35..90 ms. Every 71st data
+  request is lost; queued case adds 8 ms per request above 8 concurrent per path.
+- Baseline one batch:11.41 s no queue /11.81 s queued. Final two per case:
+  3.71–5.00 s /6.12–6.80 s. Speedup 2.3–3.1x /1.7–1.9x in this local fixture.
+- Final queued echo p 95 189.7–343.8 ms, p 99 262.2–443.1 ms. Across 140 final
+  echoes, one reached 781.7 ms during recovery. Do not claim a strict 500 ms cap,
+  or reuse an earlier candidate's 425 ms maximum as this build's maximum.
+- No phone throughput guarantee. Wire format/XOR/authentication unchanged;
+  existing 0.3.0–0.3.2 server compatible. Update APK/client for these changes.
+
+Android version 0.3.3 / code 10 uses the retained signing certificate. No native
+JNI/HEV source changes. All six Linux binaries are rebuilt. Build/lint passed (0 errors/18 warnings); original signature, both JNI ABIs,
+16 KiB ELF/ZIP alignment, all three compatibility permutations and all seven
+SHA checks passed. Evidence is in dist/validation.
+Historical evidence is archived by version; do not overwrite it.
+
+Production t.atmosl.ink ->ns 2.atmosl.ink ->136.148.220.253. Preserve env and systemd
+public-IP override; no production SSH or authentication key here. A detached
+server checkout can update with git pull --ff-only origin main. No server update
+is required for 0.3.3 client behavior. Keep the debug keystore outside Git.
+
+---
+
 # Version 0.3.2 — 20 October 2026
 
 Current release: repository HEAD. Previous published source 36cb6b2 / 0.3.1.

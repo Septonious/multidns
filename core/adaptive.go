@@ -13,8 +13,12 @@ import (
 )
 
 type ResolverHealth struct {
-	TCPFallbackFailures uint64 `json:"tcp_fallback_failures"`
-	ReadCooldownMS      int64  `json:"read_cooldown_ms"`
+	PacingWaitMS        float64 `json:"pacing_wait_ms"`
+	PacedQueries        uint64  `json:"paced_queries"`
+	RecentLossPercent   float64 `json:"recent_loss_percent"`
+	CapacityBudgetCuts  int     `json:"capacity_budget_cuts"`
+	TCPFallbackFailures uint64  `json:"tcp_fallback_failures"`
+	ReadCooldownMS      int64   `json:"read_cooldown_ms"`
 
 	CapacityLossCuts   int `json:"capacity_loss_cuts"`
 	CapacityDelayCuts  int `json:"capacity_delay_cuts"`
@@ -106,6 +110,10 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 		copy.TXWorkers = settings.TXWorkers
 		copy.RXWorkers = settings.RXWorkers
 		if p := c.paths[h.Endpoint]; p != nil {
+			copy.CapacityBudgetCuts = p.budgetCuts
+			if p.outcomeCount > 0 {
+				copy.RecentLossPercent = 100 * float64(p.outcomeLosses) / float64(p.outcomeCount)
+			}
 			copy.ReadCooldownMS = max(int64(0), time.Until(p.readRetryAt).Milliseconds())
 			copy.Capacity = p.limit
 			copy.CapacityLossCuts = p.lossCuts
@@ -131,10 +139,22 @@ func (c *Client) exchangeTimeout(addr string, op byte) time.Duration {
 	if h != nil && h.Healthy && h.Failures == 0 {
 		rtt = h.RTTMS
 		variance = h.RTTVarianceMS
+		if op == opWrite {
+			if path := c.paths[addr]; path != nil && path.txRTT > 0 && path.txChecked.After(path.lastFailure) && time.Since(path.txChecked) < 10*time.Second {
+				rtt = path.txRTT
+				variance = path.txVariance
+			}
+		}
 	}
 	c.adaptiveMu.Unlock()
 	if !c.Profile.Adaptive || rtt <= 0 {
 		return ceiling
+	}
+	if op == opWrite {
+		return min(ceiling, max(160*time.Millisecond, time.Duration(2*rtt+max(25, 4*variance))*time.Millisecond))
+	}
+	if op == opRead {
+		return min(ceiling, max(200*time.Millisecond, time.Duration(2*rtt+max(25, 4*variance)+80)*time.Millisecond))
 	}
 	allowance := 100 * time.Millisecond
 	if op == opRead {

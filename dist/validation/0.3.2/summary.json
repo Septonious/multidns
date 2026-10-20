@@ -1,0 +1,58 @@
+{
+  "version": "0.3.2",
+  "android_version_code": 9,
+  "baseline": "36cb6b2 / 0.3.1",
+  "problem": "333 shared queued requests, ~400ms average local queue, higher loaded RTT for one-member groups, inconsistent Android spacing/icons and filler copy",
+  "fixes": [
+    "Share directional pool windows across active flows; honor worker limits and opposite-direction leases",
+    "Grant admission by flow wire-credit count, with aged-work tie breaking",
+    "Select healthy low-cost control paths across groups with a delayed backup; separate data/control hedge counters",
+    "Back off idle head reads and wake them on local writes",
+    "Quarantine failed TCP download fallback direction without disabling useful uploads; probes cannot clear cooldown",
+    "Text navigation, standard vector chevrons, consistent spacing, conditional status/test actions, expandable resolver settings"
+  ],
+  "wire": "Unchanged. Existing 0.3.0/0.3.1 server compatible; APK/client update required. XOR/authentication unchanged.",
+  "controlled_benchmark": {
+    "0.3.1": {
+      "1": {
+        "bulk_seconds": 42.909757684,
+        "app_p95_ms": 11411.0,
+        "echo_samples": 9,
+        "max_admission_ms": 13296.0,
+        "retries": 27
+      },
+      "2": {
+        "bulk_seconds": 32.596417612,
+        "app_p95_ms": 8306.0,
+        "echo_samples": 8,
+        "max_admission_ms": 8296.0,
+        "retries": 44
+      }
+    },
+    "0.3.2": {
+      "1": {
+        "bulk_seconds": 8.570264205,
+        "app_p95_ms": 317.3,
+        "echo_samples": 43,
+        "max_admission_ms": 360.4,
+        "retries": 0
+      },
+      "2": {
+        "bulk_seconds": 9.423522092,
+        "app_p95_ms": 335.5,
+        "echo_samples": 45,
+        "max_admission_ms": 953.9,
+        "retries": 30
+      }
+    }
+  },
+  "benchmark_scope": "One quiet sequential batch: eight byte-verified 64KiB echo transfers, 26 idle streams and interactive application echo; eight simulated 35..120ms DNS paths. Baseline had only 9/8 echo samples. Not real phone results; retries not eliminated.",
+  "go_race_tests": "Full follow-up go test -race ./... -count=1 -timeout=180s passed; vet passed",
+  "test_limitation": "One earlier full race run hit the existing 8s idle-transfer deadline. Three isolated repeats and a follow-up full suite passed. Failure log retained; no precise cause established.",
+  "android": "Build/lint passed; 0 errors/18 warnings. Device smoke instrumentation compiled, not run on a physical device.",
+  "layout": "Headless Robolectric4.14.1/SDK35 native renders: 360dp screens plus 320dp/1.3font, >=48dp navigation targets and no clipped tab labels. Fixture native bindings shadowed; no physical VPN/Oppo test.",
+  "compatibility": "new/old, old/new and new/new authenticated startup plus byte-verified 32KiB HTTP upload/download passed",
+  "certificate_sha256": "28d3a8d227f63d209bbf4575c128a2546e38e7265e95ec2243886ef5bfbc9c54",
+  "native_alignment": "Both ABIs JNI/HEV loader check; all six packaged ELF libraries and APK ZIP16KiB alignment passed",
+  "apk_sha256": "07fd325fa85d9ea5574eed222fd705ec871edb66060c7d3a1c2c51c8176391da"
+}

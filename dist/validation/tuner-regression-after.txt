@@ -1,0 +1,4 @@
+=== RUN   TestTunerMeasuresMTUAndConcurrencyWithoutChangingProfile
+--- PASS: TestTunerMeasuresMTUAndConcurrencyWithoutChangingProfile (1.85s)
+PASS
+ok  	github.com/Septonious/multidns/core	1.864s

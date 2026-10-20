@@ -1,4 +1,29 @@
-# Diagnostics and resolver settings (0.3.2)
+# Diagnostics and resolver settings (0.3.3)
+
+## Upload changes
+
+Transport settings add **Loaded RTT budget**, default 500 ms. This is the
+controller's approximate two-way target; path failure, remote destinations and
+VPN buffering can exceed it. The existing added-delay target remains respected.
+Automatic TX can grow to 64, RX to 32; manual limits and per-flow sharing still
+bound actual exchanges. Tuning now tests TX 48/64 too and marks a confirmed
+latency-only repeat in its detailed report. Packet loss does not trigger retrying
+a higher concurrency recommendation.
+
+New JSON/debug fields:
+
+- upload_payload_bytes: maximum payload fitting a DNS upload question, respecting
+  domain length and explicit upload_mtu. No frame/authentication overhead changed.
+- loaded_rtt_limit_ms: configured target, not measured application RTT.
+- recent_loss_percent: failures among the last 128 observed data exchanges;
+  canceled attempts are excluded. It is not a raw packet-capture loss percentage.
+- paced_queries / pacing_wait_ms: paced uploads and smoothed local pacing delay.
+  This delay holds shared credits but occurs before starting the DNS network timer.
+- capacity_budget_cuts: strong cuts when write ACK timing exceeds the loaded
+  budget, independent of inflated variance. Existing loss/delay counters remain.
+
+## General settings and counters
+
 
 Update the server before installing the matching APK. Existing saved profiles and
 authentication keys remain valid. Open **Diagnostics** in the bottom navigation.
@@ -21,7 +46,7 @@ authentication keys remain valid. Open **Diagnostics** in the bottom navigation.
 The test checks authenticated TXT replies at DNS message budgets 512, 768, 900,
 1024 and 1232 bytes, then searches for a reliable full-length upload QNAME payload
 (with smaller payload fallbacks). Separate TX/RX concurrency sweeps use 1, 2, 4,
-8, 12, 16, 24 and 32 simultaneous exchanges. A sweep stops on loss or excess p95
+8, 12, 16, 24 and 32 simultaneous exchanges, plus 48/64 for TX. A sweep stops on loss or excess p95
 latency; it requires a 10% rate improvement to recommend more workers. Short
 trials estimate usable limits at that moment, not a permanent optimum. Re-test
 on another mobile network or after a significant change in resolver behavior.

@@ -1,0 +1,34 @@
+{
+  "0.3.1": {
+    "1": {
+      "bulk_seconds": 42.909757684,
+      "app_p95_ms": 11411.0,
+      "echo_samples": 9,
+      "max_admission_ms": 13296.0,
+      "retries": 27
+    },
+    "2": {
+      "bulk_seconds": 32.596417612,
+      "app_p95_ms": 8306.0,
+      "echo_samples": 8,
+      "max_admission_ms": 8296.0,
+      "retries": 44
+    }
+  },
+  "0.3.2": {
+    "1": {
+      "bulk_seconds": 8.570264205,
+      "app_p95_ms": 317.3,
+      "echo_samples": 43,
+      "max_admission_ms": 360.4,
+      "retries": 0
+    },
+    "2": {
+      "bulk_seconds": 9.423522092,
+      "app_p95_ms": 335.5,
+      "echo_samples": 45,
+      "max_admission_ms": 953.9,
+      "retries": 30
+    }
+  }
+}

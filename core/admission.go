@@ -40,7 +40,7 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 		if time.Now().Before(p.readRetryAt) {
 			return false
 		}
-		rx := max(1, p.limit-2)
+		rx := min(32, max(1, p.limit-2))
 		if settings.RXWorkers > 0 {
 			rx = min(rx, settings.RXWorkers)
 		}

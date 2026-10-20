@@ -173,7 +173,7 @@ func (c *Client) exchangeDNS(ctx context.Context, m *dns.Msg, addr, network stri
 
 // Cancellation stops waiting for a reply, not the request already being handled
 // by a recursor. Retain its transaction and capacity lease until wire completion.
-func (c *Client) exchangeDNSTracked(ctx context.Context, m *dns.Msg, addr, network string) (*dns.Msg, error, <-chan struct{}) {
+func (c *Client) exchangeDNSTracked(ctx context.Context, m *dns.Msg, addr, network string, operations ...byte) (*dns.Msg, error, <-chan struct{}) {
 	s, e := c.socket(ctx, addr, network)
 	if e != nil {
 		return nil, e, finishedDNS
@@ -224,7 +224,11 @@ func (c *Client) exchangeDNSTracked(ctx context.Context, m *dns.Msg, addr, netwo
 	case <-s.done:
 		return nil, net.ErrClosed, p.done
 	}
-	timeout := c.exchangeTimeout(addr, opRead)
+	operation := byte(opRead)
+	if len(operations) > 0 {
+		operation = operations[0]
+	}
+	timeout := c.exchangeTimeout(addr, operation)
 	deadline := time.Now().Add(timeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d

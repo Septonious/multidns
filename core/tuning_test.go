@@ -37,12 +37,20 @@ func TestTunerMeasuresMTUAndConcurrencyWithoutChangingProfile(t *testing.T) {
 	p, server := testProfile(t)
 	p.TimeoutMS = 150
 	slots := make(chan struct{}, 4)
+	var uploaded atomic.Bool
+	var delayedRX atomic.Int64
 	addr := testDNS(t, dns.HandlerFunc(func(w dns.ResponseWriter, m *dns.Msg) {
 		f, err := extract(m, p.Domain, p.Key)
 		if err != nil {
 			return
 		}
 		if f.Op == opTune {
+			if len(f.Data) > 0 {
+				uploaded.Store(true)
+			}
+			if len(f.Data) == 0 && uploaded.Load() && delayedRX.Add(1) <= 6 {
+				time.Sleep(60 * time.Millisecond)
+			}
 			packet, _ := response(m, frame{Op: f.Op, Session: f.Session, Nonce: f.Nonce, Data: tuningData(f)}, p.Key).Pack()
 			if len(packet) > 900 {
 				return
@@ -69,6 +77,17 @@ func TestTunerMeasuresMTUAndConcurrencyWithoutChangingProfile(t *testing.T) {
 	report := c.FindOptimalParameters(ctx, nil)
 	if err := report.ValidateApplicable(); err != nil {
 		t.Fatal(err)
+	}
+	repeated := false
+	for _, trial := range report.Resolvers[0].Trials {
+		if trial.Direction == "rx" && trial.Workers == 1 {
+			if trial.P95MS > 40 {
+				repeated = true
+			}
+		}
+	}
+	if !repeated {
+		t.Fatal("latency spike fixture did not run")
 	}
 	cfg := report.Settings[addr]
 	if cfg.MTU != 900 || cfg.TXWorkers < 2 || cfg.TXWorkers > 4 || cfg.RXWorkers < 2 || cfg.RXWorkers > 4 {

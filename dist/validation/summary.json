@@ -1,58 +1,112 @@
 {
-  "version": "0.3.2",
-  "android_version_code": 9,
-  "baseline": "36cb6b2 / 0.3.1",
-  "problem": "333 shared queued requests, ~400ms average local queue, higher loaded RTT for one-member groups, inconsistent Android spacing/icons and filler copy",
-  "fixes": [
-    "Share directional pool windows across active flows; honor worker limits and opposite-direction leases",
-    "Grant admission by flow wire-credit count, with aged-work tie breaking",
-    "Select healthy low-cost control paths across groups with a delayed backup; separate data/control hedge counters",
-    "Back off idle head reads and wake them on local writes",
-    "Quarantine failed TCP download fallback direction without disabling useful uploads; probes cannot clear cooldown",
-    "Text navigation, standard vector chevrons, consistent spacing, conditional status/test actions, expandable resolver settings"
-  ],
-  "wire": "Unchanged. Existing 0.3.0/0.3.1 server compatible; APK/client update required. XOR/authentication unchanged.",
-  "controlled_benchmark": {
-    "0.3.1": {
-      "1": {
-        "bulk_seconds": 42.909757684,
-        "app_p95_ms": 11411.0,
-        "echo_samples": 9,
-        "max_admission_ms": 13296.0,
-        "retries": 27
-      },
-      "2": {
-        "bulk_seconds": 32.596417612,
-        "app_p95_ms": 8306.0,
-        "echo_samples": 8,
-        "max_admission_ms": 8296.0,
-        "retries": 44
-      }
-    },
-    "0.3.2": {
-      "1": {
-        "bulk_seconds": 8.570264205,
-        "app_p95_ms": 317.3,
-        "echo_samples": 43,
-        "max_admission_ms": 360.4,
-        "retries": 0
-      },
-      "2": {
-        "bulk_seconds": 9.423522092,
-        "app_p95_ms": 335.5,
-        "echo_samples": 45,
-        "max_admission_ms": 953.9,
-        "retries": 30
-      }
-    }
+  "version": "0.3.3",
+  "android_version_code": 10,
+  "baseline": "f4f9e06 / 0.3.2",
+  "reported_phone_0_3_2": {
+    "download_mbps": 4.78,
+    "upload_mbps": 0.6,
+    "idle_ping_ms": 87,
+    "download_loaded_ping_ms": 189,
+    "upload_loaded_ping_ms": 201,
+    "admission_queued": 0
   },
-  "benchmark_scope": "One quiet sequential batch: eight byte-verified 64KiB echo transfers, 26 idle streams and interactive application echo; eight simulated 35..120ms DNS paths. Baseline had only 9/8 echo samples. Not real phone results; retries not eliminated.",
-  "go_race_tests": "Full follow-up go test -race ./... -count=1 -timeout=180s passed; vet passed",
-  "test_limitation": "One earlier full race run hit the existing 8s idle-transfer deadline. Three isolated repeats and a follow-up full suite passed. Failure log retained; no precise cause established.",
-  "android": "Build/lint passed; 0 errors/18 warnings. Device smoke instrumentation compiled, not run on a physical device.",
-  "layout": "Headless Robolectric4.14.1/SDK35 native renders: 360dp screens plus 320dp/1.3font, >=48dp navigation targets and no clipped tab labels. Fixture native bindings shadowed; no physical VPN/Oppo test.",
-  "compatibility": "new/old, old/new and new/new authenticated startup plus byte-verified 32KiB HTTP upload/download passed",
+  "fixes": [
+    "Pass actual operation to UDP timeout; write-only ACK clock,160ms floor, jitter allowance and stale-progress recovery",
+    "Pace bulk uploads while retaining physical credit; short writes and controls bypass pacing",
+    "Sparse loss mild backoff; clustered loss escalates before cooldown; unknown/high loss halves capacity",
+    "Grow capacity faster with max64 auto TX/32 RX; full negotiated256 upload positions within shared240 data credits",
+    "Configurable500ms loaded RTT feedback target independent of variance; soft queue target retained",
+    "Group backup budget does not gain a third copy when primary is in another group",
+    "Tuner tests TX48/64 and confirms a latency-only spike once; counters expose payload size, pacing, recent loss and budget cuts"
+  ],
+  "controlled_benchmark": {
+    "0.3.2": [
+      {
+        "queued": false,
+        "bulk_seconds": 11.4095004,
+        "app-max-ms": 461.3,
+        "app-p95-ms": 236.6,
+        "app-p99-ms": 434.6,
+        "app-samples": 79.0,
+        "queries": 6652.0,
+        "retries": 86.0,
+        "timeouts": 86.0,
+        "upload_mbps": 0.3676150447393823
+      },
+      {
+        "queued": true,
+        "bulk_seconds": 11.809065851,
+        "app-max-ms": 715.4,
+        "app-p95-ms": 240.8,
+        "app-p99-ms": 557.5,
+        "app-samples": 78.0,
+        "queries": 6685.0,
+        "retries": 88.0,
+        "timeouts": 88.0,
+        "upload_mbps": 0.3551766120132884
+      }
+    ],
+    "0.3.3": [
+      {
+        "queued": false,
+        "bulk_seconds": 3.710441878,
+        "app-max-ms": 303.1,
+        "app-p95-ms": 191.6,
+        "app-p99-ms": 295.7,
+        "app-samples": 28.0,
+        "queries": 5700.0,
+        "retries": 78.0,
+        "timeouts": 81.0,
+        "upload_mbps": 1.1304055252472547
+      },
+      {
+        "queued": false,
+        "bulk_seconds": 4.998029932,
+        "app-max-ms": 384.3,
+        "app-p95-ms": 197.8,
+        "app-p99-ms": 260.6,
+        "app-samples": 35.0,
+        "queries": 5839.0,
+        "retries": 75.0,
+        "timeouts": 76.0,
+        "upload_mbps": 0.8391914528454248
+      },
+      {
+        "queued": true,
+        "bulk_seconds": 6.799966834,
+        "app-max-ms": 781.7,
+        "app-p95-ms": 343.8,
+        "app-p99-ms": 443.1,
+        "app-samples": 38.0,
+        "queries": 5865.0,
+        "retries": 113.0,
+        "timeouts": 114.0,
+        "upload_mbps": 0.6168124201765776
+      },
+      {
+        "queued": true,
+        "bulk_seconds": 6.122885496,
+        "app-max-ms": 349.1,
+        "app-p95-ms": 189.7,
+        "app-p99-ms": 262.2,
+        "app-samples": 39.0,
+        "queries": 5920.0,
+        "retries": 78.0,
+        "timeouts": 78.0,
+        "upload_mbps": 0.685020812938619
+      }
+    ]
+  },
+  "benchmark_scope": "Four128KiB byte-verified upload sinks return SHA-256; separate application echo,26 idle sessions,8 simulated35..90ms DNS paths, every71st data request lost. Queued case adds8ms per concurrent request above8 per path. One baseline batch and two final batches per case.",
+  "benchmark_result": "Upload completion2.3\u20133.1x faster without queue,1.7\u20131.9x with queue. Final p99 below444ms; one of140 echoes reached781.7ms.",
+  "strict_500ms_worst_case_guarantee": false,
+  "limits": "500ms is an approximate controller target. Failure recovery, destination/network RTT, VPN buffering and scheduler stalls can exceed it. No0.3.3 physical phone measurement available. Earlier candidates and failed runs retained, not claimed as final results.",
+  "go_checks": "Final full go test -race ./... -count=1 -timeout=180s passed; vet passed; overload/burst checks passed three race-instrumented repetitions",
+  "regressions": "Deterministic tuner latency spike fails on0.3.2 (RX1) and passes after one confirmation. Intermediate controller exceeded overload retry bound26/25; clustered-loss escalation repaired it.",
+  "android": "Build/lint passed, 0 errors/18 warnings; no physical Oppo runtime test",
+  "wire": "Unchanged; existing0.3.0\u20130.3.2 server compatible. APK/client update required. XOR/authentication overhead unchanged.",
+  "compatibility": "new/old,old/new,new/new authenticated startup plus byte-verified32KiB HTTP upload/download passed",
   "certificate_sha256": "28d3a8d227f63d209bbf4575c128a2546e38e7265e95ec2243886ef5bfbc9c54",
-  "native_alignment": "Both ABIs JNI/HEV loader check; all six packaged ELF libraries and APK ZIP16KiB alignment passed",
-  "apk_sha256": "07fd325fa85d9ea5574eed222fd705ec871edb66060c7d3a1c2c51c8176391da"
+  "native_alignment": "Both ABIs JNI/HEV loader checks and all six packaged ELF/ZIP16KiB checks passed",
+  "apk_sha256": "74afba19b6806f38d34c1a087caf2b427874ef10c3393c4dd1272db4ab1af750"
 }

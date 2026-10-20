@@ -1,0 +1,10 @@
+?   	github.com/Septonious/multidns/cmd/client	[no test files]
+?   	github.com/Septonious/multidns/cmd/scanner	[no test files]
+?   	github.com/Septonious/multidns/cmd/server	[no test files]
+--- FAIL: TestResolverCapacityBackpressure (2.20s)
+    congestion_test.go:65: 32768 bytes in 2.085s; retries=26 timeouts=26 dropped=15
+    congestion_test.go:68: persistent resolver overload: 26 retries
+FAIL
+FAIL	github.com/Septonious/multidns/core	62.412s
+ok  	github.com/Septonious/multidns/mobile	2.278s
+FAIL

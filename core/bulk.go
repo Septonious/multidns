@@ -98,7 +98,7 @@ func (c *Client) dataCapacity(op byte) int {
 				if time.Now().Before(path.readRetryAt) {
 					continue
 				}
-				limit = min(max(1, limit-2), max(1, limit-(path.flight-path.reads)))
+				limit = min(32, min(max(1, limit-2), max(1, limit-(path.flight-path.reads))))
 				if c.activeUploads.Load() > 0 {
 					limit = min(limit, max(1, path.limit/2))
 				}

@@ -43,16 +43,18 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.3.2 shares request
-windows across busy streams, schedules shared credits fairly by flow, moves
-controls to healthy fast paths independently of group size, and backs off idle
-polls. Broken TCP download fallbacks enter a directional cooldown while uploads
-remain eligible. The dark Android UI uses text navigation, consistent spacing,
-standard chevrons and less idle/status copy. Comprehensive counters and
-**Find optimal parameters** remain under Diagnostics. See
+amd64/arm64 server, client, and scanner binaries. Version 0.3.3 targets upload:
+sparse-loss capacity backoff, faster ACK-based recovery, bulk query pacing and
+full use of negotiated upload credits. Automatic TX capacity can grow to 64 per
+resolver; RX stays capped at 32. Shared flow fairness remains. A configurable
+500 ms loaded-RTT budget adds an absolute ACK-delay guard alongside the existing
+queue-delay target. This is feedback control, not a hard promise during failures.
+Diagnostics show payload bytes/query, recent loss, pacing and budget cuts.
+**Find optimal parameters** can test TX up to 64 and confirms latency-only spikes
+once before stopping. Existing explicit worker limits remain respected.
+The 0.3.0–0.3.2 server remains compatible; update the APK/client for these changes.
+Existing profiles, XOR obfuscation and authentication are unchanged. See
 [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) for settings and counter definitions.
-The 0.3.0/0.3.1 server is compatible; update the APK/client for these changes.
-Existing profiles, XOR obfuscation and authentication are unchanged.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
 

@@ -34,6 +34,7 @@ func tuningData(f frame) []byte {
 }
 
 type TuningTrial struct {
+	Repeated       bool    `json:"repeated,omitempty"`
 	Direction      string  `json:"direction"`
 	MTU            int     `json:"mtu"`
 	Workers        int     `json:"workers"`
@@ -192,12 +193,25 @@ func (c *Client) FindOptimalParameters(ctx context.Context, emit func(string)) T
 				event("Testing " + direction + " concurrency and loaded RTT")
 				bestRate := 0.0
 				selected := 1
-				for _, workers := range []int{1, 2, 4, 8, 12, 16, 24, 32} {
+				workerSteps := []int{1, 2, 4, 8, 12, 16, 24, 32}
+				if direction == "tx" {
+					workerSteps = append(workerSteps, 48, 64)
+				}
+				for _, workers := range workerSteps {
 					trial := c.tuneTrial(ctx, addr, direction, result.Settings.MTU, workers, max(6, workers*2), result.Settings.UploadMTU)
 					result.Trials = append(result.Trials, trial)
 					// Allow normal jitter, but reject a concurrency step that adds queue
 					// delay or loss. A 10% rate gain is needed to justify extra workers.
-					stable := trial.Sent > 0 && trial.Received == trial.Sent && trial.P95MS <= result.BaselineMS+max(float64(c.Profile.LatencyTargetMS), result.BaselineMS*.5)
+					limit := min(c.writeRTTLimit(), result.BaselineMS+max(float64(c.Profile.LatencyTargetMS), result.BaselineMS*.5))
+					stable := trial.stableWithin(limit)
+					// Confirm a latency-only failure once. Scheduling jitter must not lock
+					// an otherwise capable resolver to one worker; loss still stops growth.
+					if !stable && trial.Sent > 0 && trial.Received == trial.Sent && ctx.Err() == nil {
+						trial = c.tuneTrial(ctx, addr, direction, result.Settings.MTU, workers, max(6, workers*2), result.Settings.UploadMTU)
+						trial.Repeated = true
+						result.Trials = append(result.Trials, trial)
+						stable = trial.stableWithin(limit)
+					}
 					if stable && trial.BytesPerSecond > bestRate*1.10 {
 						bestRate = trial.BytesPerSecond
 						selected = workers
@@ -234,4 +248,8 @@ func (r TuningReport) ValidateApplicable() error {
 		return fmt.Errorf("no working resolver parameters were found")
 	}
 	return nil
+}
+
+func (t TuningTrial) stableWithin(limit float64) bool {
+	return t.Sent > 0 && t.Received == t.Sent && t.P95MS <= limit
 }

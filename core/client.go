@@ -19,17 +19,19 @@ import (
 
 type Protector interface{ Protect(fd int) bool }
 type Stats struct {
-	Exchanges        uint64 `json:"exchanges"`
-	Timeouts         uint64 `json:"timeouts"`
-	DNSErrors        uint64 `json:"dns_errors"`
-	InvalidReplies   uint64 `json:"invalid_replies"`
-	SocketErrors     uint64 `json:"socket_errors"`
-	NetworkChanges   uint64 `json:"network_changes"`
-	TransportVersion string `json:"transport_version"`
-	PeerUploadWindow uint32 `json:"peer_upload_window"`
-	Hedges           uint64 `json:"hedges"`
-	DataHedges       uint64 `json:"data_hedges"`
-	ControlHedges    uint64 `json:"control_hedges"`
+	UploadPayloadBytes int    `json:"upload_payload_bytes"`
+	LoadedRTTLimitMS   int    `json:"loaded_rtt_limit_ms"`
+	Exchanges          uint64 `json:"exchanges"`
+	Timeouts           uint64 `json:"timeouts"`
+	DNSErrors          uint64 `json:"dns_errors"`
+	InvalidReplies     uint64 `json:"invalid_replies"`
+	SocketErrors       uint64 `json:"socket_errors"`
+	NetworkChanges     uint64 `json:"network_changes"`
+	TransportVersion   string `json:"transport_version"`
+	PeerUploadWindow   uint32 `json:"peer_upload_window"`
+	Hedges             uint64 `json:"hedges"`
+	DataHedges         uint64 `json:"data_hedges"`
+	ControlHedges      uint64 `json:"control_hedges"`
 
 	Queries    uint64 `json:"queries"`
 	Replies    uint64 `json:"replies"`
@@ -164,7 +166,7 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{TransportVersion: "0.3.2", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
+	return Stats{UploadPayloadBytes: c.uploadSize, LoadedRTTLimitMS: c.Profile.LoadedRTTLimitMS, TransportVersion: "0.3.3", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
@@ -224,6 +226,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				backups = append(backups, addr)
 			}
 		}
+		backups = backups[:min(len(backups), max(0, len(targets)-1))]
 		targets = append([]string{primary}, backups...)
 		hedgeDelay = c.hedgeDelay(primary, f.Op, f.Bulk)
 	}
@@ -310,6 +313,12 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				results <- result{e: raceCtx.Err()}
 				return
 			}
+			if f.Op == opWrite && f.Bulk {
+				if err := c.paceUpload(raceCtx, addr); err != nil {
+					results <- result{e: err}
+					return
+				}
+			}
 			started := time.Now()
 			c.recordStart(addr)
 			c.adaptiveMu.Lock()
@@ -332,7 +341,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				}
 			}
 			fallback := false
-			r, err, done := c.exchangeDNSTracked(raceCtx, m, addr, "udp")
+			r, err, done := c.exchangeDNSTracked(raceCtx, m, addr, "udp", f.Op)
 			wireDone = done
 			if err == nil && r.Truncated {
 				fallback = true
@@ -342,7 +351,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				}
 				c.adaptiveMu.Unlock()
 				tcpCtx, tcpCancel := context.WithTimeout(raceCtx, c.exchangeTimeout(addr, f.Op))
-				r, err, wireDone = c.exchangeDNSTracked(tcpCtx, m, addr, "tcp")
+				r, err, wireDone = c.exchangeDNSTracked(tcpCtx, m, addr, "tcp", f.Op)
 				tcpCancel()
 			}
 			var answer frame
@@ -590,7 +599,7 @@ func (s *Conn) window(operation ...byte) int {
 	traffic := s.traffic.Load()
 	desired := base
 	if traffic >= 4096 {
-		desired = min(128, base<<min(5, int(traffic/4096)))
+		desired = min(ceiling, base<<min(5, int(traffic/4096)))
 	}
 	capacity := max(1, s.client.dataCapacity(op))
 	peers := s.client.readerCount()

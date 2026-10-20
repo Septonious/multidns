@@ -1,0 +1,16 @@
+=== RUN   TestSparseLossDoesNotHalveAnOtherwiseFastPath
+--- PASS: TestSparseLossDoesNotHalveAnOtherwiseFastPath (0.00s)
+=== RUN   TestLoadedRTTGuardOverridesInflatedVariance
+--- PASS: TestLoadedRTTGuardOverridesInflatedVariance (0.00s)
+=== RUN   TestUploadUsesFullNegotiatedWindowWithinPoolBudget
+--- PASS: TestUploadUsesFullNegotiatedWindowWithinPoolBudget (0.00s)
+=== RUN   TestPacingCancellationDoesNotLeakWireCredits
+--- PASS: TestPacingCancellationDoesNotLeakWireCredits (0.01s)
+=== RUN   TestUploadRTOUsesWriteACKsInsteadOfReadWait
+--- PASS: TestUploadRTOUsesWriteACKsInsteadOfReadWait (0.00s)
+=== RUN   TestUDPWriteUsesDirectionalTimeoutOnTheWire
+--- PASS: TestUDPWriteUsesDirectionalTimeoutOnTheWire (0.16s)
+=== RUN   TestSparseLossKeepsFreshUploadClockButNoProgressInvalidatesIt
+--- PASS: TestSparseLossKeepsFreshUploadClockButNoProgressInvalidatesIt (0.00s)
+PASS
+ok  	github.com/Septonious/multidns/core	0.196s

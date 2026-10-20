@@ -30,6 +30,7 @@ type ResolverSettings struct {
 	RXWorkers int `json:"rx_workers,omitempty"`
 }
 type Profile struct {
+	LoadedRTTLimitMS int                         `json:"loaded_rtt_limit_ms,omitempty"`
 	ResolverSettings map[string]ResolverSettings `json:"resolver_settings,omitempty"`
 	LatencyTargetMS  int                         `json:"latency_target_ms,omitempty"`
 	Obfuscation      string                      `json:"obfuscation,omitempty"`
@@ -80,6 +81,12 @@ func (p *Profile) Validate() error {
 	if p.Obfuscation != "" && p.Obfuscation != "none" && p.Obfuscation != "xor" {
 		return fmt.Errorf("obfuscation must be none or xor")
 	}
+	if p.LoadedRTTLimitMS == 0 {
+		p.LoadedRTTLimitMS = 500
+	}
+	if p.LoadedRTTLimitMS < 100 || p.LoadedRTTLimitMS > 2000 {
+		return fmt.Errorf("loaded RTT limit must be 100..2000 ms")
+	}
 	if p.LatencyTargetMS == 0 {
 		p.LatencyTargetMS = 30
 	}
@@ -98,8 +105,8 @@ func (p *Profile) Validate() error {
 		if settings.UploadMTU != 0 && (settings.UploadMTU < 8 || settings.UploadMTU > uploadCapacity(*p)) {
 			return fmt.Errorf("upload payload exceeds DNS name capacity")
 		}
-		if settings.TXWorkers < 0 || settings.TXWorkers > 32 || settings.RXWorkers < 0 || settings.RXWorkers > 32 {
-			return fmt.Errorf("TX/RX workers must be 0 (auto) or 1..32")
+		if settings.TXWorkers < 0 || settings.TXWorkers > 64 || settings.RXWorkers < 0 || settings.RXWorkers > 32 {
+			return fmt.Errorf("TX workers must be 0..64 and RX workers 0..32")
 		}
 		normalized[endpoint] = settings
 	}

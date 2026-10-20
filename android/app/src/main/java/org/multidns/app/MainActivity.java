@@ -700,6 +700,14 @@ public final class MainActivity extends Activity {
             "HTTPS already uses TLS. XOR masks payloads; it does not provide secure encryption."
                 + " Authentication remains enabled.")
         .setTextColor(Ui.MUTED);
+    EditText loadedLimit =
+        field(
+            tuning,
+            "Loaded RTT budget (100–2000 ms)",
+            "" + original.optInt("loaded_rtt_limit_ms", 500),
+            false);
+    loadedLimit.setInputType(InputType.TYPE_CLASS_NUMBER);
+    text(tuning, "Adaptive target, not a guarantee during path failures.").setTextColor(Ui.MUTED);
     EditText latencyBudget =
         field(
             tuning,
@@ -804,6 +812,7 @@ public final class MainActivity extends Activity {
             p.put("window", Integer.parseInt(window.getText().toString()));
             p.put("adaptive", adaptive.isChecked());
             p.put("obfuscation", xor.isChecked() ? "xor" : "none");
+            p.put("loaded_rtt_limit_ms", Integer.parseInt(loadedLimit.getText().toString()));
             p.put("latency_target_ms", Integer.parseInt(latencyBudget.getText().toString()));
             p.put("timeout_ms", Integer.parseInt(exchangeTimeout.getText().toString()));
             p.put("automatic_groups", automatic.isChecked());
@@ -1067,7 +1076,12 @@ public final class MainActivity extends Activity {
                   + " · "
                   + stats.optString("transport_version", BuildConfig.VERSION_NAME)
                   + "\n");
+      total
+          .append("Loaded RTT budget: ")
+          .append(stats.optInt("loaded_rtt_limit_ms", 500))
+          .append(" ms\n");
       String[] labels = {
+        "Upload payload/query (bytes)",
         "Resolver attempts",
         "Replies",
         "ARQ retries",
@@ -1083,6 +1097,7 @@ public final class MainActivity extends Activity {
         "Queued requests"
       };
       String[] keys = {
+        "upload_payload_bytes",
         "queries",
         "replies",
         "retries",
@@ -1133,6 +1148,8 @@ public final class MainActivity extends Activity {
           "Capacity",
           "Capacity cuts from loss",
           "Capacity cuts from upload delay",
+          "Capacity cuts from RTT budget",
+          "Paced uploads",
           "Idle capacity recoveries",
           "Wire in flight",
           "Active requests",
@@ -1160,6 +1177,8 @@ public final class MainActivity extends Activity {
           "capacity",
           "capacity_loss_cuts",
           "capacity_delay_cuts",
+          "capacity_budget_cuts",
+          "paced_queries",
           "capacity_recoveries",
           "wire_in_flight",
           "in_flight",
@@ -1185,6 +1204,12 @@ public final class MainActivity extends Activity {
         };
         for (int j = 0; j < fields.length; j++)
           row.append("\n").append(names[j]).append(": ").append(r.optLong(fields[j]));
+        row.append(
+            String.format(
+                Locale.ROOT,
+                "\nRecent loss: %.2f%%\nPacing wait: %.2f ms",
+                r.optDouble("recent_loss_percent", 0),
+                r.optDouble("pacing_wait_ms", 0)));
         row.append("\nLast error: ").append(r.optString("last_error", "none"));
         view.setText(row.toString());
       }
@@ -1205,7 +1230,7 @@ public final class MainActivity extends Activity {
         "0 uses automatic limits. DNS MTU is the UDP DNS message budget. Upload payload is limited"
             + " by the tunnel domain. Workers cap in-flight exchanges.");
     EditText mtu = field(form, "DNS MTU (512–1232; 0 = auto)", "" + cfg.optInt("mtu"), false),
-        tx = field(form, "TX workers (0–32)", "" + cfg.optInt("tx_workers"), false),
+        tx = field(form, "TX workers (0–64)", "" + cfg.optInt("tx_workers"), false),
         rx = field(form, "RX workers (0–32)", "" + cfg.optInt("rx_workers"), false),
         upload =
             field(form, "Upload payload bytes (0 = auto)", "" + cfg.optInt("upload_mtu"), false);
@@ -1318,7 +1343,8 @@ public final class MainActivity extends Activity {
                   Locale.ROOT,
                   "%s · MTU %d · TX payload %d B · %d workers\n"
                       + "%d/%d replies · p95 %.1f ms · %.1f KiB/s\n\n",
-                  trial.optString("direction").toUpperCase(Locale.ROOT),
+                  trial.optString("direction").toUpperCase(Locale.ROOT)
+                      + (trial.optBoolean("repeated") ? " (repeat)" : ""),
                   trial.optInt("mtu"),
                   trial.optInt("upload_mtu"),
                   trial.optInt("workers"),

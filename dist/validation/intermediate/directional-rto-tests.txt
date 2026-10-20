@@ -1,0 +1,6 @@
+=== RUN   TestUploadRTOUsesWriteACKsInsteadOfReadWait
+--- PASS: TestUploadRTOUsesWriteACKsInsteadOfReadWait (0.00s)
+=== RUN   TestUDPWriteUsesDirectionalTimeoutOnTheWire
+--- PASS: TestUDPWriteUsesDirectionalTimeoutOnTheWire (0.12s)
+PASS
+ok  	github.com/Septonious/multidns/core	0.133s
