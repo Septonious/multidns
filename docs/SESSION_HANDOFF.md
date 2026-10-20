@@ -1,3 +1,67 @@
+# Version 0.2.1 — 20 October 2026
+
+Current authorized work: investigate very high retry counts, fix/optimize transport,
+apply a complete dark theme, and deliver matching APK/Linux binaries to GitHub.
+Previous release was a346812 / 0.2.0. Prior session-stop instructions below remain
+historical; user has authorized continued development, builds and publication.
+
+- Shared per-resolver adaptive admission: initial up to 8 data exchanges, additive
+  growth on useful payload, multiplicative decrease on timeout/SERVFAIL bursts,
+  bounds 2..32. Download admission leaves room for upload; control bypasses this
+  data limit and retains shared reserved slots. Queued admission does not start
+  exchange timers. Scheduler includes queue depth and actual learned capacity.
+- RTT variance can increase retransmission allowance while preserving the old
+  four-RTT safety margin, configured ceiling and 300 ms floor. Health probes keep
+  loaded-path estimates and cumulative error evidence instead of replacing them.
+- Case-normalized DNS questions accepted; header-only TC responses trigger fully
+  authenticated TCP fallback. Strict session/stream/sequence/nonce/HMAC checks stay.
+- Server reserves control/upload room against read long-polls and replies with
+  authenticated WAIT under saturation, replacing silent drops.
+- Android 12+ uses best matching physical network callbacks. Earlier Android uses
+  deterministic validated Ethernet/Wi-Fi/cellular preference. Available standby
+  networks no longer blindly trigger rebinds. Real network changes preserve streams.
+- Diagnostics distinguish logical exchanges/retries from per-member timeouts, DNS
+  errors, invalid replies and socket errors; include rebind count, per-path queue,
+  capacity and last failure. Dashboard shows retry percentage and major causes.
+- Entire Android UI uses charcoal surfaces/mint accents, dark native dialogs,
+  fields/spinners and system bars. Version 0.2.1 / versionCode 5. Retained signing
+  certificate matches the installed 0.1.2/0.2.0 lineage; profiles are preserved.
+- Capacity fixture: 32 KiB verified echo, one pair/window 32/25 ms delay, max eight
+  in-flight data requests per resolver. Before: 16.120s / 942 logical retries /
+  1903 dropped requests; final after: 2.692s / 1 retry / 35 drops. This reproduces
+  overload, not the user's unknown production loss rate. Adaptive must be enabled.
+- Go race/vet and network regressions passed; matching old/new endpoints transfer
+  authenticated byte-verified 32 KiB HTTP uploads/downloads. Android build/lint,
+  both JNI ABIs, 16 KiB ELF/ZIP alignment, signature/certificate and SHA checks
+  are recorded in dist/validation. Previous evidence is under validation/0.2.0.
+- Timing varied across runs (capacity 2.692–13.026s / 1–9 retries); all raw
+  evidence retained. Final clean-path medians: upload 2.231s, download 0.468s,
+  zero retries. Final loss echo p50 41ms / p95 45ms, all bytes preserved and 40
+  logical retries matching injected loss. Do not turn these into phone guarantees.
+- No physical Oppo runtime test or production network measurement was available.
+  Do not claim phone throughput/RTT or actual retry cause from synthetic fixtures.
+
+Production: t.atmosl.ink delegated via ns2.atmosl.ink to 136.148.220.253. Preserve
+/etc/multidns/server.env and systemd public-IP listen override. No production key
+or SSH access here. User's checkout may be detached: use explicit remote/branch:
+  cd ~/multidns
+  git pull --ff-only origin main
+  (cd dist && sha256sum -c SHA256SUMS)
+  sudo install -m 755 dist/multidns-server-linux-amd64 /usr/local/bin/multidns-server.new
+  sudo mv -f /usr/local/bin/multidns-server.new /usr/local/bin/multidns-server
+  sudo systemctl restart multidns
+  sudo systemctl --no-pager --full status multidns
+
+Build with retained toolchain and signing key as described in earlier notes.
+Always set ANDROID_USER_HOME=/workspace/toolchains/android-user and
+MULTIDNS_DEBUG_KEYSTORE=/workspace/toolchains/android-user/debug.keystore.
+Certificate SHA256: 28d3a8d227f63d209bbf4575c128a2546e38e7265e95ec2243886ef5bfbc9c54.
+Do not inspect/commit the private store, credentials, or server environment file.
+No delegated agents were used; current developer instructions prohibit spawning
+unless user/AGENTS/skill explicitly requests it.
+
+Earlier notes below are historical.
+
 # Version 0.2.0 — 20 October 2026
 
 Current authorized work: fix Disconnect, redesign the entire Android UI, optimize

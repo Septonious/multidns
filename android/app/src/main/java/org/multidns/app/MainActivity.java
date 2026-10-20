@@ -83,12 +83,8 @@ public final class MainActivity extends Activity {
   public void onCreate(Bundle saved) {
     super.onCreate(saved);
     getWindow().setStatusBarColor(Ui.BG);
-    getWindow().setNavigationBarColor(Ui.WHITE);
-    getWindow()
-        .getDecorView()
-        .setSystemUiVisibility(
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                | (Build.VERSION.SDK_INT >= 26 ? View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0));
+    getWindow().setNavigationBarColor(Ui.SURFACE);
+    getWindow().getDecorView().setSystemUiVisibility(0);
     try {
       profiles = ProfileStore.load(this);
       if (profiles.length() > 0)
@@ -144,7 +140,7 @@ public final class MainActivity extends Activity {
     TextView word = Ui.label(this, "MultiDNS", 22, Ui.INK, true);
     word.setPadding(dp(10), 0, 0, 0);
     brand.addView(word, new LinearLayout.LayoutParams(0, -2, 1));
-    TextView version = Ui.label(this, "0.2", 12, Ui.MUTED, false);
+    TextView version = Ui.label(this, BuildConfig.VERSION_NAME, 12, Ui.MUTED, false);
     version.setContentDescription("Version " + BuildConfig.VERSION_NAME);
     brand.addView(version);
     root.addView(brand);
@@ -157,7 +153,7 @@ public final class MainActivity extends Activity {
     scroll.addView(page);
     root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     LinearLayout nav = new LinearLayout(this);
-    nav.setBackground(Ui.shape(this, Ui.WHITE, 24, Ui.LINE));
+    nav.setBackground(Ui.shape(this, Ui.SURFACE, 24, Ui.LINE));
     nav.setPadding(dp(8), dp(8), dp(8), dp(8));
     String[] names = {"Connect", "Scanner", "Routing"};
     for (int i = 0; i < names.length; i++) {
@@ -166,7 +162,7 @@ public final class MainActivity extends Activity {
       item.setOrientation(LinearLayout.VERTICAL);
       item.setGravity(Gravity.CENTER);
       item.setPadding(dp(4), dp(8), dp(4), dp(8));
-      item.setBackground(Ui.ripple(this, Ui.WHITE, 18, 0));
+      item.setBackground(Ui.ripple(this, Ui.SURFACE, 18, 0));
       Ui.Icon icon = new Ui.Icon(this, i);
       item.addView(icon, new LinearLayout.LayoutParams(dp(23), dp(23)));
       TextView label = Ui.label(this, names[i], 12, Ui.MUTED, true);
@@ -195,7 +191,7 @@ public final class MainActivity extends Activity {
   private void selectTab(int tab) {
     currentTab = tab;
     for (int i = 0; i < navItems.size(); i++) {
-      navItems.get(i).setBackground(Ui.ripple(this, i == tab ? Ui.SOFT : Ui.WHITE, 18, 0));
+      navItems.get(i).setBackground(Ui.ripple(this, i == tab ? Ui.SOFT : Ui.SURFACE, 18, 0));
       navItems.get(i).setSelected(i == tab);
       navLabels.get(i).setTextColor(i == tab ? Ui.ACCENT : Ui.MUTED);
       navIcons.get(i).color(i == tab ? Ui.ACCENT : Ui.MUTED);
@@ -214,7 +210,7 @@ public final class MainActivity extends Activity {
     LinearLayout box = new LinearLayout(this);
     box.setOrientation(LinearLayout.VERTICAL);
     box.setPadding(dp(20), dp(20), dp(20), dp(20));
-    box.setBackground(Ui.shape(this, Ui.WHITE, 22, Ui.LINE));
+    box.setBackground(Ui.shape(this, Ui.SURFACE, 22, Ui.LINE));
     LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
     p.setMargins(0, 0, 0, dp(16));
     parent.addView(box, p);
@@ -341,11 +337,15 @@ public final class MainActivity extends Activity {
             String.format(
                 Locale.US,
                 "↓ %.1f MB received   ·   ↑ %.1f MB sent\n"
-                    + "%d active streams   ·   %d network retries",
+                    + "%d active streams   ·   %d retries (%.1f%%)\n"
+                    + "%d timeouts   ·   %d DNS errors",
                 down / 1000000.0,
                 up / 1000000.0,
                 stats.optLong("streams"),
-                stats.optLong("retries")));
+                stats.optLong("retries"),
+                stats.optLong("retries") * 100.0 / Math.max(1, stats.optLong("exchanges")),
+                stats.optLong("timeouts"),
+                stats.optLong("dns_errors")));
       return "";
     } catch (JSONException e) {
       return "Waiting for connection statistics";
@@ -471,7 +471,7 @@ public final class MainActivity extends Activity {
       row.setOrientation(LinearLayout.VERTICAL);
       row.setPadding(dp(16), dp(14), dp(16), dp(14));
       row.setBackground(
-          Ui.ripple(this, i == selected ? Ui.SOFT : Ui.WHITE, 14, i == selected ? 0 : Ui.LINE));
+          Ui.ripple(this, i == selected ? Ui.SOFT : Ui.SURFACE, 14, i == selected ? 0 : Ui.LINE));
       TextView name =
           Ui.label(
               this,
@@ -835,7 +835,7 @@ public final class MainActivity extends Activity {
         } catch (Exception ignored) {
         }
         TextView card = text(box, resolver + measured + "  ⋮⋮");
-        card.setBackground(Ui.ripple(this, Ui.WHITE, 10, Ui.LINE));
+        card.setBackground(Ui.ripple(this, Ui.SURFACE, 10, Ui.LINE));
         card.setPadding(dp(12), dp(12), dp(12), dp(12));
         card.setOnLongClickListener(
             v -> {

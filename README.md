@@ -42,11 +42,12 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.2.0 fixes VPN shutdown,
-redesigns the native Android screens, and improves sustained transfers with
-scaling windows, selective upload acknowledgements, bounded idle polling, and
-reused TCP fallback connections. Update both the server binary and APK. Existing
-profiles and keys are preserved when installing the APK as an update.
+amd64/arm64 server, client, and scanner binaries. Version 0.2.1 adds a complete
+dark theme, per-resolver congestion control, detailed retry diagnostics, robust
+DNS reply handling, server backpressure, and stable physical-network selection.
+Adaptive scheduling must be enabled to use the learned resolver budgets. Update
+both the server binary and APK. Existing profiles and keys are preserved when
+installing the APK as an update.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
 

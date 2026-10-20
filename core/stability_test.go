@@ -178,6 +178,7 @@ func TestLossRecoveryAndLoadedRTT(t *testing.T) {
 		t.Fatal(err)
 	}
 	elapsed := time.Since(start)
+	t.Log("diagnostics:", client.StatsJSON())
 	stopProbes()
 	timings := <-probed
 	if !bytes.Equal(out, payload) {

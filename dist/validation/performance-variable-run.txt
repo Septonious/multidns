@@ -1,0 +1,12 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Septonious/multidns/core
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkTunnelTransfer/upload-2         	       1	6617008794 ns/op	   0.01 MB/s	      1370 queries/transfer	        24.00 retries/transfer
+BenchmarkTunnelTransfer/upload-2         	       1	3977624461 ns/op	   0.02 MB/s	      1347 queries/transfer	        27.00 retries/transfer
+BenchmarkTunnelTransfer/upload-2         	       1	2506141848 ns/op	   0.03 MB/s	      1431 queries/transfer	         0 retries/transfer
+BenchmarkTunnelTransfer/download-2       	       1	 522112347 ns/op	   0.14 MB/s	       259.0 queries/transfer	         0 retries/transfer
+BenchmarkTunnelTransfer/download-2       	       1	 676081242 ns/op	   0.11 MB/s	       244.0 queries/transfer	         0 retries/transfer
+BenchmarkTunnelTransfer/download-2       	       1	 711549568 ns/op	   0.10 MB/s	       265.0 queries/transfer	         0 retries/transfer
+PASS
+ok  	github.com/Septonious/multidns/core	15.935s

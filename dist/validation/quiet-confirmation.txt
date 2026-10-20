@@ -1,0 +1,14 @@
+=== RUN   TestResolverCapacityBackpressure
+    congestion_test.go:65: 32768 bytes in 5.392s; retries=3 timeouts=16 dropped=33
+--- PASS: TestResolverCapacityBackpressure (5.56s)
+goos: linux
+goarch: amd64
+pkg: github.com/Septonious/multidns/core
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkTunnelTransfer
+BenchmarkTunnelTransfer/upload
+BenchmarkTunnelTransfer/upload-2         	       1	4247172631 ns/op	   0.02 MB/s	      1349 queries/transfer	        12.00 retries/transfer
+BenchmarkTunnelTransfer/download
+BenchmarkTunnelTransfer/download-2       	       1	1633984010 ns/op	   0.05 MB/s	       268.0 queries/transfer	        16.00 retries/transfer
+PASS
+ok  	github.com/Septonious/multidns/core	11.671s

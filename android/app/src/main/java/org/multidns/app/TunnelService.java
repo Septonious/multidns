@@ -72,15 +72,7 @@ public final class TunnelService extends VpnService {
       startForeground(1, notification(this, "MultiDNS · Connecting", 1));
       engine = Mobile.newEngine();
       connectivity = getSystemService(ConnectivityManager.class);
-      for (Network n : connectivity.getAllNetworks()) {
-        NetworkCapabilities caps = connectivity.getNetworkCapabilities(n);
-        if (caps != null
-            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) {
-          network = n;
-          break;
-        }
-      }
+      network = preferredPhysicalNetwork();
       callback =
           new ConnectivityManager.NetworkCallback() {
             @Override
@@ -88,13 +80,7 @@ public final class TunnelService extends VpnService {
               handler.post(
                   () -> {
                     if (stopping) return;
-                    if (n.equals(network)) return;
-                    network = n;
-                    setUnderlyingNetworks(new Network[] {n});
-                    final Engine current = engine;
-                    if (current != null)
-                      new Thread(current::networkChanged, "multidns-rebind").start();
-                    if (tun != null) state = "Connected";
+                    useNetwork(Build.VERSION.SDK_INT >= 31 ? n : preferredPhysicalNetwork());
                   });
             }
 
@@ -103,18 +89,30 @@ public final class TunnelService extends VpnService {
               handler.post(
                   () -> {
                     if (!stopping && n.equals(network)) {
-                      network = null;
-                      if (tun != null) state = "Waiting for network";
+                      useNetwork(preferredPhysicalNetwork());
                     }
                   });
             }
+
+            @Override
+            public void onCapabilitiesChanged(Network n, NetworkCapabilities caps) {
+              if (Build.VERSION.SDK_INT < 31)
+                handler.post(
+                    () -> {
+                      if (!stopping) useNetwork(preferredPhysicalNetwork());
+                    });
+            }
           };
-      connectivity.registerNetworkCallback(
+      NetworkRequest request =
           new NetworkRequest.Builder()
               .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
               .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-              .build(),
-          callback);
+              .build();
+      // Watching every available network and choosing the newest callback can
+      // repeatedly move sockets to a standby cellular path while Wi-Fi is active.
+      if (Build.VERSION.SDK_INT >= 31)
+        connectivity.registerBestMatchingNetworkCallback(request, callback, handler);
+      else connectivity.registerNetworkCallback(request, callback);
       final String config = intent.getStringExtra("profile");
       final Engine current = engine;
       new Thread(
@@ -230,6 +228,39 @@ public final class TunnelService extends VpnService {
               .start();
         }
       };
+
+  private Network preferredPhysicalNetwork() {
+    Network best = null;
+    int bestScore = -1;
+    for (Network candidate : connectivity.getAllNetworks()) {
+      NetworkCapabilities caps = connectivity.getNetworkCapabilities(candidate);
+      if (caps == null
+          || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+          || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)) continue;
+      int score = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ? 100 : 0;
+      if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) score += 30;
+      else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) score += 20;
+      else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) score += 10;
+      if (score > bestScore || (score == bestScore && candidate.equals(network))) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  private void useNetwork(Network next) {
+    if (stopping || (next == null ? network == null : next.equals(network))) return;
+    network = next;
+    setUnderlyingNetworks(next == null ? new Network[0] : new Network[] {next});
+    if (next == null) {
+      if (tun != null) state = "Waiting for network";
+      return;
+    }
+    final Engine current = engine;
+    if (current != null) new Thread(current::networkChanged, "multidns-rebind").start();
+    if (tun != null) state = "Connected";
+  }
 
   boolean protectFD(int fd) {
     try {

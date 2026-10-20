@@ -1,6 +1,64 @@
 # Performance and tuning
 
-## Version 0.2.0: lifecycle, load handling and sustained traffic
+## Version 0.2.1: retries and resolver congestion
+
+Low probe latency does not establish a resolver's sustained capacity. The previous
+client enlarged stream windows without reducing requests to an overloaded resolver.
+Many streams could also fill a shared path independently. Adaptive mode now shares
+an admission budget across all streams for each resolver. It starts at up to eight
+data exchanges, grows additively on useful payload, and halves after timeout or
+SERVFAIL bursts (minimum two, maximum 32). Downloads leave upload capacity available;
+control traffic retains its separate shared reservation. Waiting for admission does
+not consume global slots or run the DNS response timeout. Canceled race members
+release their admission without being classified as loss. Fixed scheduling remains
+available when adaptive mode is disabled.
+
+The scheduler accounts for queued requests and learned capacity. RTT variance now
+increases the retransmission allowance when necessary, retaining the previous
+four-RTT margin, 300 ms floor and configured timeout ceiling. Health probes preserve
+bulk loss counters and loaded RTT estimates. DNS question matching accepts case
+normalization, and a header-only truncated reply can trigger TCP fallback. Only a
+fully authenticated TCP answer can complete that RPC.
+
+Server read long-polls have a 192-request sublimit within the existing 256-handler
+budget. A saturated server sends an authenticated WAIT reply rather than silently
+dropping a request. Android 12+ follows the system's best matching physical network;
+older versions consistently prefer validated Ethernet/Wi-Fi over standby cellular.
+Merely receiving a callback for another available network no longer blindly selects
+it. Real changes still rebind sockets while preserving the tunnel session.
+
+### Capacity-limited regression
+
+An identical fixture was run against `a346812` (0.2.0) and this version: one racing
+pair, base window 32, adaptive scheduling, 25 ms request delay, eight simultaneous
+data requests allowed per resolver, and a byte-verified 32,768-byte TCP echo.
+Requests over that capacity are deliberately dropped.
+
+| Version | Completion | Logical retries | Requests dropped by fixture |
+|---|---:|---:|---:|
+| 0.2.0 | 16.120 s | 942 | 1903 |
+| 0.2.1 final run | 2.692 s | 1 | 35 |
+
+The recorded repeated runs varied: the new capacity fixture took 2.692–13.026 s
+with 1–9 retries. Final clean-path medians were 2.231 s upload / 0.468 s download
+with zero retries; the baseline medians were 2.325 s / 0.786 s. Other recorded
+runs had longer times and additional timeouts. Keep the raw variability in mind;
+these short fixtures do not establish a reliable speed multiplier. The final
+correlated-loss echo recovered all 86,016 bytes with exactly 40 logical retries
+for the injected loss, and loaded probes p50 41 ms / p95 45 ms (118 samples).
+
+These are controlled measurements, not a diagnosis of the user's specific network
+or a promise of phone speed. Small discovery losses are expected as capacity grows.
+The original multi-group clean-path benchmark and correlated-loss echo are retained
+in `dist/validation/`; compare throughput, loaded RTT and errors together. Packet
+loss cannot be removed by client tuning, and different IPs may share one rate limit.
+
+Use adaptive scheduling, base window 8, the same resolver groups and no background
+scan for the first phone comparison. Install the matching APK and server update.
+The APK now uses a dark charcoal/mint theme throughout, including native dialogs
+and system bars. The signing certificate is unchanged, preserving saved profiles.
+
+## Historical 0.2.0: lifecycle, load handling and sustained traffic
 
 The base window saved in existing profiles remains unchanged. In adaptive mode,
 useful traffic gradually widens the per-stream window after 4 KiB, bounded by the
@@ -25,7 +83,7 @@ replies were verified across two connections with a network reset in between.
 Socket creation never holds the shared map lock across protection/dial callbacks;
 reset invalidates in-progress old-network dials. DNS writes honor deadlines.
 
-### Latest controlled comparison
+### 0.1.2 → 0.2.0 controlled comparison
 
 Baseline is `62d8474` (0.1.2). Both versions use the **same** benchmark with adaptive
 mode enabled: five groups of two endpoints, base window 8, 40 ms delay plus 40 ms
@@ -86,7 +144,16 @@ but both endpoints should be updated to obtain the full improvement.
 
 ## Reading the counters
 
+- `exchanges`: logical attempts, including valid WAIT polls. The dashboard shows
+  `100 * retries / exchanges`; this is not physical packet-loss percentage.
 - `queries`: resolver exchange attempts, including duplicate group members.
+- `timeouts`, `dns_errors`, `invalid_replies`, `socket_errors`: uncanceled failures
+  per resolver attempt. Two members can fail in one logical retry, or one can fail
+  while the other succeeds. Counts need not match logical retries.
+- `network_changes`: socket rebinds requested by the network layer.
+- Per-resolver diagnostics retain cumulative error counters, last error, RTT
+  variance, learned `capacity`, and requests `queued` for admission. Health probes
+  do not erase this evidence; their own test traffic is outside transfer counters.
 - `replies`: valid authenticated responses observed before race cancellation.
 - `retries`: failed transport exchanges that need another attempt. Cancellation
   while shutting down is not counted as a failed exchange.

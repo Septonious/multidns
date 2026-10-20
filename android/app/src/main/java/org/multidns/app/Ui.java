@@ -9,13 +9,14 @@ import android.widget.*;
 
 /** Small native design system. No web views or third-party UI runtime. */
 final class Ui {
-  static final int BG = 0xfff5f7f6,
-      INK = 0xff172d2b,
-      MUTED = 0xff6e807d,
-      ACCENT = 0xff137766,
-      SOFT = 0xffe6f2ed,
-      LINE = 0xffdce5e1,
-      WHITE = 0xffffffff;
+  static final int BG = 0xff101617,
+      INK = 0xffe7efed,
+      MUTED = 0xffa5b7b1,
+      ACCENT = 0xff78dac0,
+      SOFT = 0xff173c35,
+      LINE = 0xff304341,
+      SURFACE = 0xff192224,
+      ON_ACCENT = 0xff09231d;
 
   static int dp(Context c, int n) {
     return Math.round(n * c.getResources().getDisplayMetrics().density);
@@ -31,7 +32,7 @@ final class Ui {
 
   static android.graphics.drawable.Drawable ripple(Context c, int color, int radius, int border) {
     return new RippleDrawable(
-        ColorStateList.valueOf(0x18137766), shape(c, color, radius, border), null);
+        ColorStateList.valueOf(0x2878dac0), shape(c, color, radius, border), null);
   }
 
   static TextView label(Context c, String s, int size, int color, boolean bold) {
@@ -53,13 +54,13 @@ final class Ui {
     b.setTextColor(
         new ColorStateList(
             new int[][] {new int[] {-android.R.attr.state_enabled}, new int[] {}},
-            new int[] {0xff98aaa4, primary ? WHITE : INK}));
+            new int[] {0xff657a74, primary ? ON_ACCENT : INK}));
     b.setMinHeight(dp(c, 50));
     b.setMinimumHeight(dp(c, 50));
     b.setMinWidth(0);
     b.setMinimumWidth(0);
     b.setPadding(dp(c, 16), dp(c, 10), dp(c, 16), dp(c, 10));
-    b.setBackground(ripple(c, primary ? ACCENT : WHITE, 16, primary ? 0 : LINE));
+    b.setBackground(ripple(c, primary ? ACCENT : SURFACE, 16, primary ? 0 : LINE));
     b.setStateListAnimator(null);
   }
 
@@ -69,7 +70,7 @@ final class Ui {
     e.setHintTextColor(MUTED);
     e.setTextSize(15);
     e.setPadding(dp(c, 14), dp(c, 14), dp(c, 14), dp(c, 14));
-    e.setBackground(shape(c, WHITE, 14, LINE));
+    e.setBackground(shape(c, SURFACE, 14, LINE));
     e.setMinHeight(dp(c, 52));
     e.setSelectAllOnFocus(false);
   }
@@ -86,7 +87,7 @@ final class Ui {
 
   static void styleSpinner(Spinner s) {
     Context c = s.getContext();
-    s.setBackground(ripple(c, WHITE, 14, LINE));
+    s.setBackground(ripple(c, SURFACE, 14, LINE));
     s.setPadding(dp(c, 8), dp(c, 4), dp(c, 8), dp(c, 4));
     s.setMinimumHeight(dp(c, 52));
   }

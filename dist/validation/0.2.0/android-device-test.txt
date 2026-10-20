@@ -1,0 +1,1 @@
+NOT RUN: no physical Android device available. Software API 35 and API 28 emulator attempts did not complete framework boot. Custom SmokeInstrumentation test APK builds successfully. No APK runtime failure was observed or claimed. Physical Oppo Find X9 Ultra verification remains pending.

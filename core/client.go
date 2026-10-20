@@ -13,10 +13,19 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/miekg/dns"
 )
 
 type Protector interface{ Protect(fd int) bool }
 type Stats struct {
+	Exchanges      uint64 `json:"exchanges"`
+	Timeouts       uint64 `json:"timeouts"`
+	DNSErrors      uint64 `json:"dns_errors"`
+	InvalidReplies uint64 `json:"invalid_replies"`
+	SocketErrors   uint64 `json:"socket_errors"`
+	NetworkChanges uint64 `json:"network_changes"`
+
 	Queries    uint64 `json:"queries"`
 	Replies    uint64 `json:"replies"`
 	Retries    uint64 `json:"retries"`
@@ -33,6 +42,7 @@ type Client struct {
 	adaptiveMu sync.Mutex
 	groups     []Group
 	health     map[string]*ResolverHealth
+	paths      map[string]*pathState
 	spares     []string
 	deficits   []float64
 
@@ -40,19 +50,20 @@ type Client struct {
 	names   map[string]nameEntry
 	proxies sync.Map
 
-	Profile                                                Profile
-	session                                                uint64
-	next                                                   atomic.Uint32
-	cursor                                                 atomic.Uint64
-	queries, replies, retries, waits, uploaded, downloaded atomic.Uint64
-	streams                                                atomic.Int64
-	dialer                                                 *net.Dialer
-	ctx                                                    context.Context
-	cancel                                                 context.CancelFunc
-	slots                                                  chan struct{}
-	readSlots                                              chan struct{}
-	dataSlots                                              chan struct{}
-	uploadSize                                             int
+	Profile                                                                      Profile
+	session                                                                      uint64
+	next                                                                         atomic.Uint32
+	cursor                                                                       atomic.Uint64
+	queries, replies, retries, waits, uploaded, downloaded                       atomic.Uint64
+	streams                                                                      atomic.Int64
+	exchanges, timeouts, dnsErrors, invalidReplies, socketErrors, networkChanges atomic.Uint64
+	dialer                                                                       *net.Dialer
+	ctx                                                                          context.Context
+	cancel                                                                       context.CancelFunc
+	slots                                                                        chan struct{}
+	readSlots                                                                    chan struct{}
+	dataSlots                                                                    chan struct{}
+	uploadSize                                                                   int
 }
 
 func NewClient(p Profile, protector Protector) (*Client, error) {
@@ -120,7 +131,7 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
+	return Stats{Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
@@ -146,6 +157,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 	if e != nil {
 		return frame{}, e
 	}
+	c.exchanges.Add(1)
 	type result struct {
 		f frame
 		e error
@@ -159,6 +171,12 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 	defer cancel()
 	for _, addr := range targets {
 		go func(addr string) {
+			release, err := c.acquirePath(raceCtx, addr, f.Op)
+			if err != nil {
+				results <- result{e: err}
+				return
+			}
+			defer release()
 			if f.Op == opRead {
 				select {
 				case c.readSlots <- struct{}{}:
@@ -194,10 +212,16 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				tcpCancel()
 			}
 			var answer frame
+			if err == nil && r.Rcode != dns.RcodeSuccess {
+				err = dnsFailure{r.Rcode}
+			}
 			if err == nil {
 				answer, err = parseResponse(r, c.Profile.Key)
+				if err != nil {
+					err = fmt.Errorf("%w: %v", errInvalidReply, err)
+				}
 				if err == nil && (answer.Session != f.Session || answer.Stream != f.Stream || answer.Seq != f.Seq || answer.Nonce != f.Nonce || answer.Op != f.Op || len(answer.Data) == 0) {
-					err = fmt.Errorf("mismatched response")
+					err = fmt.Errorf("%w: mismatched response", errInvalidReply)
 				}
 			}
 			size := 0
@@ -207,6 +231,9 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				} else if f.Op == opWrite {
 					size = len(f.Data)
 				}
+			}
+			if err != nil && raceCtx.Err() == nil {
+				c.recordFailure(err)
 			}
 			c.recordEnd(addr, time.Since(started), size, f.Op, err, raceCtx.Err() != nil)
 			if err == nil {

@@ -40,6 +40,7 @@ type Server struct {
 	mu          sync.Mutex
 	streams     map[streamKey]*serverStream
 	slots       chan struct{}
+	readSlots   chan struct{}
 	readSize    int
 }
 
@@ -48,15 +49,9 @@ func NewServer(domain, key string) (*Server, error) {
 	if e := p.Validate(); e != nil {
 		return nil, e
 	}
-	return &Server{Domain: p.Domain, Key: key, streams: map[streamKey]*serverStream{}, slots: make(chan struct{}, 256), readSize: downloadCapacity(p)}, nil
+	return &Server{Domain: p.Domain, Key: key, streams: map[streamKey]*serverStream{}, slots: make(chan struct{}, 256), readSlots: make(chan struct{}, 192), readSize: downloadCapacity(p)}, nil
 }
 func (s *Server) ServeDNS(w dns.ResponseWriter, m *dns.Msg) {
-	select {
-	case s.slots <- struct{}{}:
-		defer func() { <-s.slots }()
-	default:
-		return
-	}
 	f, e := extract(m, s.Domain, s.Key)
 	if e != nil {
 		r := new(dns.Msg)
@@ -68,7 +63,30 @@ func (s *Server) ServeDNS(w dns.ResponseWriter, m *dns.Msg) {
 	if dt := time.Now().Unix() - sent; dt > 120 || dt < -120 {
 		return
 	}
-	data := s.handle(f)
+	// Authenticate before sending a retryable busy response. Read long-polls
+	// reserve room for uploads and control traffic instead of filling every
+	// worker and silently dropping subsequent requests until their timeouts.
+	admitted := true
+	if f.Op == opRead {
+		select {
+		case s.readSlots <- struct{}{}:
+			defer func() { <-s.readSlots }()
+		default:
+			admitted = false
+		}
+	}
+	if admitted {
+		select {
+		case s.slots <- struct{}{}:
+			defer func() { <-s.slots }()
+		default:
+			admitted = false
+		}
+	}
+	data := []byte{statusWait}
+	if admitted {
+		data = s.handle(f)
+	}
 	f.Data = data
 	reply := response(m, f, s.Key)
 	if _, udp := w.RemoteAddr().(*net.UDPAddr); udp {

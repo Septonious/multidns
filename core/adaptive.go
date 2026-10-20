@@ -13,15 +13,23 @@ import (
 )
 
 type ResolverHealth struct {
-	Endpoint     string    `json:"endpoint"`
-	RTTMS        float64   `json:"rtt_ms"`
-	Goodput      float64   `json:"goodput_bytes_per_second"`
-	UploadRate   float64   `json:"upload_bytes_per_second"`
-	DownloadRate float64   `json:"download_bytes_per_second"`
-	Failures     int       `json:"failures"`
-	Healthy      bool      `json:"healthy"`
-	InFlight     int       `json:"in_flight"`
-	Checked      time.Time `json:"checked"`
+	Timeouts       uint64    `json:"timeouts"`
+	DNSErrors      uint64    `json:"dns_errors"`
+	InvalidReplies uint64    `json:"invalid_replies"`
+	SocketErrors   uint64    `json:"socket_errors"`
+	LastError      string    `json:"last_error,omitempty"`
+	Capacity       int       `json:"capacity"`
+	Queued         int       `json:"queued"`
+	RTTVarianceMS  float64   `json:"rtt_variance_ms"`
+	Endpoint       string    `json:"endpoint"`
+	RTTMS          float64   `json:"rtt_ms"`
+	Goodput        float64   `json:"goodput_bytes_per_second"`
+	UploadRate     float64   `json:"upload_bytes_per_second"`
+	DownloadRate   float64   `json:"download_bytes_per_second"`
+	Failures       int       `json:"failures"`
+	Healthy        bool      `json:"healthy"`
+	InFlight       int       `json:"in_flight"`
+	Checked        time.Time `json:"checked"`
 }
 
 func (c *Client) groupsSnapshot() []Group {
@@ -64,7 +72,12 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 	defer c.adaptiveMu.Unlock()
 	out := []ResolverHealth{}
 	for _, h := range c.health {
-		out = append(out, *h)
+		copy := *h
+		if p := c.paths[h.Endpoint]; p != nil {
+			copy.Capacity = p.limit
+			copy.Queued = p.waiting
+		}
+		out = append(out, copy)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Endpoint < out[j].Endpoint })
 	return out
@@ -77,9 +90,10 @@ func (c *Client) exchangeTimeout(addr string, op byte) time.Duration {
 	ceiling := time.Duration(c.Profile.TimeoutMS) * time.Millisecond
 	c.adaptiveMu.Lock()
 	h := c.health[addr]
-	rtt := 0.0
+	rtt, variance := 0.0, 0.0
 	if h != nil && h.Healthy && h.Failures == 0 {
 		rtt = h.RTTMS
+		variance = h.RTTVarianceMS
 	}
 	c.adaptiveMu.Unlock()
 	if !c.Profile.Adaptive || rtt <= 0 {
@@ -89,7 +103,7 @@ func (c *Client) exchangeTimeout(addr string, op byte) time.Duration {
 	if op == opRead {
 		allowance += 80 * time.Millisecond
 	}
-	estimate := max(300*time.Millisecond, time.Duration(rtt*4)*time.Millisecond+allowance)
+	estimate := max(300*time.Millisecond, time.Duration(max(4*rtt, rtt+4*variance))*time.Millisecond+allowance)
 	return min(ceiling, estimate)
 }
 
@@ -115,8 +129,20 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		return
 	}
 	h.Checked = time.Now()
+	c.updateCapacityLocked(addr, size, op, err)
 	if err != nil {
 		h.Failures++
+		h.LastError = failureSummary(err)
+		switch failureKind(err) {
+		case "timeout":
+			h.Timeouts++
+		case "dns":
+			h.DNSErrors++
+		case "invalid":
+			h.InvalidReplies++
+		default:
+			h.SocketErrors++
+		}
 		if h.Failures >= 3 {
 			h.Healthy = false
 		}
@@ -129,8 +155,10 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		rtt := float64(elapsed.Microseconds()) / 1000
 		if h.RTTMS == 0 {
 			h.RTTMS = rtt
+			h.RTTVarianceMS = rtt / 2
 		} else {
-			h.RTTMS = .8*h.RTTMS + .2*rtt
+			h.RTTVarianceMS = .75*h.RTTVarianceMS + .25*math.Abs(rtt-h.RTTMS)
+			h.RTTMS = .875*h.RTTMS + .125*rtt
 		}
 	}
 	if size > 0 && elapsed > 0 {
@@ -184,7 +212,12 @@ func (c *Client) chooseGroup(base int, bulk bool, operation ...byte) int {
 					throughput = h.UploadRate
 				}
 			}
-			candidate := rtt * (1 + float64(pending)/float64(c.Profile.Window))
+			capacity := c.Profile.Window
+			if path := c.paths[addr]; path != nil {
+				capacity = path.limit
+				pending = max(pending, path.flight) + path.waiting
+			}
+			candidate := rtt * (1 + float64(pending)/float64(capacity))
 			cost = math.Min(cost, candidate)
 			if throughput == 0 {
 				capacity := float64(chunkSize)
@@ -193,7 +226,7 @@ func (c *Client) chooseGroup(base int, bulk bool, operation ...byte) int {
 				}
 				throughput = capacity * 1000 / math.Max(rtt, 1)
 			}
-			rate = math.Max(rate, throughput/(1+float64(pending)/float64(c.Profile.Window)))
+			rate = math.Max(rate, throughput/(1+float64(pending)/float64(capacity)))
 		}
 		if cost < bestCost {
 			bestCost = cost
@@ -278,10 +311,18 @@ func (c *Client) TestLatency(ctx context.Context, emit func(ResolverHealth)) {
 				c.adaptiveMu.Lock()
 				old := c.health[addr]
 				if old != nil {
-					h.Goodput = old.Goodput
-					h.UploadRate = old.UploadRate
-					h.DownloadRate = old.DownloadRate
-					h.InFlight = old.InFlight
+					// A tiny health probe must not erase accumulated loss diagnostics
+					// or replace the loaded-path RTT estimator.
+					if !old.Healthy && h.Healthy {
+						old.Failures = 0
+					}
+					old.Healthy = h.Healthy
+					if old.RTTMS == 0 {
+						old.RTTMS = h.RTTMS
+						old.RTTVarianceMS = h.RTTMS / 2
+					}
+					old.Checked = h.Checked
+					h = *old
 				}
 				c.health[addr] = &h
 				c.adaptiveMu.Unlock()

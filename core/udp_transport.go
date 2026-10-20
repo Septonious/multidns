@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ func (c *Client) ResetSockets() {
 	}
 	c.sockets = map[string]*resolverSocket{}
 	c.socketsEpoch++
+	c.networkChanges.Add(1)
 }
 
 func (c *Client) socket(ctx context.Context, addr, network string) (*resolverSocket, error) {
@@ -102,12 +104,16 @@ func (s *resolverSocket) readLoop() {
 		if e != nil {
 			return
 		}
-		if !m.Response || len(m.Question) != 1 {
+		if !m.Response || len(m.Question) > 1 {
 			continue
 		}
 		s.mu.Lock()
 		p, ok := s.pending[m.Id]
-		if ok && p.question == m.Question[0].Name {
+		// DNS names are case-insensitive. Some recursors normalize case.
+		// A header-only TC reply is permitted to request TCP fallback; only
+		// the subsequent fully authenticated response can complete the RPC.
+		match := len(m.Question) == 1 && m.Question[0].Qtype == dns.TypeTXT && m.Question[0].Qclass == dns.ClassINET && strings.EqualFold(p.question, m.Question[0].Name)
+		if ok && (match || len(m.Question) == 0 && m.Truncated) {
 			select {
 			case p.reply <- m:
 			default:

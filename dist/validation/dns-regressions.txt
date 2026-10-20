@@ -1,0 +1,10 @@
+=== RUN   TestCaseNormalizedDNSQuestion
+--- PASS: TestCaseNormalizedDNSQuestion (0.09s)
+=== RUN   TestHeaderOnlyTruncationFallsBackToAuthenticatedTCP
+--- PASS: TestHeaderOnlyTruncationFallsBackToAuthenticatedTCP (0.10s)
+=== RUN   TestServerReadSaturationKeepsControlAndBusyReplies
+--- PASS: TestServerReadSaturationKeepsControlAndBusyReplies (0.03s)
+=== RUN   TestResolverErrorsSurviveHealthRefresh
+--- PASS: TestResolverErrorsSurviveHealthRefresh (0.07s)
+PASS
+ok  	github.com/Septonious/multidns/core	1.560s
