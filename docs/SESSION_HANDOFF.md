@@ -1,6 +1,75 @@
+# Version 0.3.4 — 21 October 2026 (Moscow)
+
+Release source: repository HEAD; previous published checkpoint 612c04b / 0.3.3.
+User's latest request replaces manual per-resolver tuning/discovery and verbose
+statistics with automatic control, ICMP + authenticated E2E tests while offline,
+slim green/yellow/red live resolver cards, opt-in debug capture, and cleaner UI.
+
+Implemented:
+- Native dark navy/blue UI, vector navigation/action icons, compact selectable
+  server rows with per-row overflow, differentiated transfer rates. Scan actions
+  are one contextual start/pause control plus resume; filters collapse. Fixed
+  header/keyboard focus, narrow fonts, server selection persistence/deletion.
+- Resolvers tab switches between cancellable ICMP/E2E tests and live cards with
+  IP, measured DNS RTT, unique outstanding assigned stream count and short
+  semantic status. Standby/checking/degraded are yellow; confirmed down is red.
+  ICMP can be unavailable without invalidating a working authenticated DNS path.
+- Legacy Android per-resolver overrides ignored/removed; adaptive=true, base window 8.
+  Existing groups, routing, keys and optional XOR remain. CLI override support
+  and dormant tuning API/wire operation remain for compatibility, without UI.
+- Normal Android snapshots use SummaryJSON, no full report sorting/serialization.
+  Debug switch enables detailed copy reports and optional timing. Essential
+  feedback/counters remain internal. Single snapshot worker; hidden activity
+  stops polling and service snapshots slow to 5 s unless capture is enabled.
+- Isolated error pauses assignments 25..100 ms without false-down flicker.
+  Confirmed no-progress failures open the circuit; genuine authenticated replies
+  restore it. Failed tiny probes cannot override recent data. Busy paths skip
+  redundant health probes; idle/spare/down probes reuse protected tracked UDP
+  sockets. Probe cancellation was fixed and tested against a real blackhole.
+- Fair admission reserves global data/RX credits before path ownership, wakes
+  the selected waiter rather than broadcasting, counts per-resolver unique
+  assignments. Speculative reads expire after 350 ms without ending the stream.
+- Global adaptive budget bounded at 512, RX 160, per-path 64 / RX 32; retain pacing and
+  500 ms feedback guard. Reject 1024-credit candidate: severe CPU/latency regression.
+  Empty TCP-fallback WAITs cannot revive a broken large-reply path.
+- Wire authentication/XOR/header bytes unchanged. Lowercase Base32 avoids extra
+  case conversion. Existing 0.3.0–0.3.3 servers remain compatible.
+
+Validation:
+- Final full race suite+vet pass. Real whole-resolver outage test additionally
+  proves writes move to others during outage and verifies restored transfer;
+  it no longer demands a false health transition for a partially working path.
+- Snapshot stream counts, unknown/degraded/down states, global credits,
+  isolated loss, health refresh, cancellation and leases covered.
+- Native Robolectric screens 360 dp and 320 dp / 130% font pass, including live/offline
+  mode switch, debug switch+copy, navigation touch targets, fixed header.
+- Byte-verified CLI compatibility passes new/old,old/new,new/new. Six Linux
+  binaries and APK built. Original debug signing identity, both ABIs, C-only HEV
+  bridge and 16 KiB ELF/ZIP alignment verified. Android lint passes.
+- Final capacity fixture four 512 KiB uploads + 26 idle + app echo:8 paths 4.61/4.65 s,
+  20 paths 4.59/4.06 s; old 0.3.3 same fixture 16.36/15.17 s for 8/20. Final app maxima
+  132.5..145.1 ms. Loss fixture 4 x 128 KiB, every 71st data request lost: 3.02 s/no queue
+  and 6.01 s/queued, maxima 261.3/228.4 ms. 229 final echoes overall. Not phone proof.
+- Intermediate mixed full race timed out; targeted recheck and final full suite
+  pass. Keep failure logs. No physical Oppo, real ICMP behavior or native VPN
+  lifecycle execution here; instrumentation compiled only.
+
+Production remains t.atmosl.ink -> ns2.atmosl.ink ->136.148.220.253.
+Preserve /etc/multidns/server.env and systemd public-IP listen override.
+No server update required for new client/UI behavior. Android code 11, same
+signing cert 28d3a8d227f63d209bbf4575c128a2546e38e7265e95ec2243886ef5bfbc9c54.
+Build env/toolchains retained outside Git under /workspace/toolchains; env script
+and all current validation work moved to /workspace/work/multidns-0.3.4-validation
+when finished. Keep debug.keystore private. Recovery bundle/archive live in
+/workspace. Final APK/binary hashes are in dist/SHA256SUMS.
+
+---
+
+Historical release notes follow.
+
 # Version 0.3.3 — 20 October 2026
 
-Current release: repository HEAD. Previous published checkpoint f 4f 9e 06 / 0.3.2.
+Current release: repository HEAD. Previous published checkpoint f4f9e06 / 0.3.2.
 User phone result: 4.78 Mbps down / 0.60 Mbps up, idle ping 87 ms,
 download/upload-loaded ping 189/201 ms. Admission queue was empty. They requested
 more upload throughput while keeping loaded RTT below 500 ms. Four fast 31.131
@@ -52,7 +121,7 @@ Validation:
   request is lost; queued case adds 8 ms per request above 8 concurrent per path.
 - Baseline one batch:11.41 s no queue /11.81 s queued. Final two per case:
   3.71–5.00 s /6.12–6.80 s. Speedup 2.3–3.1x /1.7–1.9x in this local fixture.
-- Final queued echo p 95 189.7–343.8 ms, p 99 262.2–443.1 ms. Across 140 final
+- Final queued echo p95 189.7–343.8 ms, p99 262.2–443.1 ms. Across 140 final
   echoes, one reached 781.7 ms during recovery. Do not claim a strict 500 ms cap,
   or reuse an earlier candidate's 425 ms maximum as this build's maximum.
 - No phone throughput guarantee. Wire format/XOR/authentication unchanged;
@@ -64,7 +133,7 @@ JNI/HEV source changes. All six Linux binaries are rebuilt. Build/lint passed (0
 SHA checks passed. Evidence is in dist/validation.
 Historical evidence is archived by version; do not overwrite it.
 
-Production t.atmosl.ink ->ns 2.atmosl.ink ->136.148.220.253. Preserve env and systemd
+Production t.atmosl.ink ->ns2.atmosl.ink ->136.148.220.253. Preserve env and systemd
 public-IP override; no production SSH or authentication key here. A detached
 server checkout can update with git pull --ff-only origin main. No server update
 is required for 0.3.3 client behavior. Keep the debug keystore outside Git.

@@ -10,21 +10,37 @@ import (
 var errPathBusy = errors.New("resolver has no spare capacity")
 
 type admission struct {
+	wake    chan struct{}
 	stream  uint32
 	bulk    bool
 	op      byte
 	started time.Time
 }
 
+// Wake the selected waiter, not every pending request. Broadcasting here made
+// a large pool spend most of its CPU repeatedly contending for adaptiveMu.
 func (c *Client) wakeAdmissionsLocked() {
 	c.admissionChoiceValid = false
-	if c.admissionWake != nil {
-		close(c.admissionWake)
+	if next := c.nextAdmissionLocked(); next != nil {
+		select {
+		case next.wake <- struct{}{}:
+		default:
+		}
 	}
-	c.admissionWake = make(chan struct{})
 }
 func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
+	// Reserve global credits in the fair queue, before assigning a resolver.
+	// Otherwise unsent reads can occupy path leases behind the global RX cap.
+	if cap(c.dataSlots) > 0 && c.leasedData >= cap(c.dataSlots) {
+		return false
+	}
+	if op == opRead && cap(c.readSlots) > 0 && c.leasedReads >= cap(c.readSlots) {
+		return false
+	}
 	p := c.pathLocked(addr)
+	if time.Now().Before(p.retryAt) {
+		return false
+	}
 	if h := c.health[addr]; h != nil && !h.Healthy {
 		if time.Now().Before(p.retryAt) || p.flight > 0 {
 			return false
@@ -46,11 +62,8 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 		}
 		// A read long-poll carries no upstream data. Reserve half the path for
 		// upload whenever writers are waiting, rather than starving their ACKs.
-		for _, a := range c.admissions {
-			if a.op == opWrite {
-				rx = min(rx, max(1, p.limit/2))
-				break
-			}
+		if c.waitingWrites > 0 {
+			rx = min(rx, max(1, p.limit/2))
 		}
 		return p.reads < rx
 	}
@@ -58,21 +71,25 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 }
 func (c *Client) leasePathLocked(addr string, op byte, bulk bool) func() {
 	p := c.pathLocked(addr)
+	c.leasedData++
 	p.flight++
 	if bulk {
 		p.bulk++
 	}
 	if op == opRead {
 		p.reads++
+		c.leasedReads++
 	}
 	return func() {
 		c.adaptiveMu.Lock()
 		p.flight--
+		c.leasedData--
 		if bulk {
 			p.bulk--
 		}
 		if op == opRead {
 			p.reads--
+			c.leasedReads--
 		}
 		p.signal()
 		c.wakeAdmissionsLocked()
@@ -100,9 +117,12 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 	if len(streams) > 0 {
 		stream = streams[0]
 	}
-	a := &admission{stream: stream, bulk: bulk, op: op, started: time.Now()}
+	a := &admission{wake: make(chan struct{}, 1), stream: stream, bulk: bulk, op: op, started: time.Now()}
 	c.adaptiveMu.Lock()
 	c.admissions = append(c.admissions, a)
+	if op == opWrite {
+		c.waitingWrites++
+	}
 	c.wakeAdmissionsLocked()
 	remove := func() {
 		for i, v := range c.admissions {
@@ -111,16 +131,21 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 				break
 			}
 		}
-		c.wakeAdmissionsLocked()
+		if op == opWrite {
+			c.waitingWrites--
+		}
+		c.admissionChoiceValid = false
 	}
 	for {
 		if err := ctx.Err(); err != nil {
 			remove()
+			c.wakeAdmissionsLocked()
 			c.adaptiveMu.Unlock()
 			return "", nil, err
 		}
 		if err := c.ctx.Err(); err != nil {
 			remove()
+			c.wakeAdmissionsLocked()
 			c.adaptiveMu.Unlock()
 			return "", nil, err
 		}
@@ -174,7 +199,8 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 			}
 			remove()
 			release := c.leaseFlowLocked(chosen, op, bulk, stream)
-			if h := c.health[chosen]; h != nil {
+			c.wakeAdmissionsLocked()
+			if h := c.health[chosen]; h != nil && c.diagnostics.Load() {
 				ms := float64(time.Since(a.started).Microseconds()) / 1000
 				h.QueueMS = .875*h.QueueMS + .125*ms
 				h.MaxQueueMS = max(h.MaxQueueMS, ms)
@@ -182,7 +208,7 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 			c.adaptiveMu.Unlock()
 			return chosen, release, nil
 		}
-		wake := c.admissionWake
+		wake := a.wake
 		c.adaptiveMu.Unlock()
 		// A short wake also bounds priority aging when no exchange completes.
 		timer := time.NewTimer(20 * time.Millisecond)
@@ -254,9 +280,18 @@ func (c *Client) leaseFlowLocked(addr string, op byte, bulk bool, stream uint32)
 	}
 	key := flowKey{stream, op}
 	c.flowFlight[key]++
+	p := c.pathLocked(addr)
+	if p.streams == nil {
+		p.streams = map[uint32]int{}
+	}
+	p.streams[stream]++
 	return func() {
 		c.adaptiveMu.Lock()
 		c.flowFlight[key]--
+		p.streams[stream]--
+		if p.streams[stream] == 0 {
+			delete(p.streams, stream)
+		}
 		if c.flowFlight[key] == 0 {
 			delete(c.flowFlight, key)
 		}

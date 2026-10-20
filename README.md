@@ -43,18 +43,22 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.3.3 targets upload:
-sparse-loss capacity backoff, faster ACK-based recovery, bulk query pacing and
-full use of negotiated upload credits. Automatic TX capacity can grow to 64 per
-resolver; RX stays capped at 32. Shared flow fairness remains. A configurable
-500 ms loaded-RTT budget adds an absolute ACK-delay guard alongside the existing
-queue-delay target. This is feedback control, not a hard promise during failures.
-Diagnostics show payload bytes/query, recent loss, pacing and budget cuts.
-**Find optimal parameters** can test TX up to 64 and confirms latency-only spikes
-once before stopping. Existing explicit worker limits remain respected.
-The 0.3.0–0.3.2 server remains compatible; update the APK/client for these changes.
-Existing profiles, XOR obfuscation and authentication are unchanged. See
-[`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) for settings and counter definitions.
+amd64/arm64 server, client, and scanner binaries. Version 0.3.4 adds a compact
+server picker with overflow actions, consistent dark colors and vector icons,
+and a **Resolvers** tab. While disconnected it offers ICMP + authenticated E2E
+DNS tests; while connected it displays colored resolver cards with latency,
+current stream assignments and status. Android transport settings adapt
+automatically; old manual resolver overrides and the discovery menu are removed.
+
+Detailed debug capture is off by default and can be enabled for copying a report.
+Regular UI snapshots are small, expensive timing is optional, and active payload
+traffic replaces redundant health probes. Resolver loss no longer causes a false
+offline/recovered transition on every isolated timeout. The fair scheduler wakes
+one selected request per credit and bounds global data credits at 512, with the
+existing pacing and 500 ms loaded-RTT feedback target. Internet/recovery outliers
+can exceed that target. The 0.3.0–0.3.3 server remains compatible; update the APK
+for the new UI and client behavior. Saved profiles/keys and wire format remain
+compatible. See [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) for exact semantics.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
 

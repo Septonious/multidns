@@ -14,15 +14,16 @@ import (
 type Protector interface{ Protect(fd int) bool }
 type Events interface{ OnEvent(message string) }
 type Engine struct {
-	mu          sync.Mutex
-	client      *core.Client
-	listener    net.Listener
-	scanCancel  context.CancelFunc
-	tuneCancel  context.CancelFunc
-	tuneStopped bool
-	startCancel context.CancelFunc
-	generation  uint64
-	stopped     bool
+	mu            sync.Mutex
+	client        *core.Client
+	listener      net.Listener
+	scanCancel    context.CancelFunc
+	latencyCancel context.CancelFunc
+	tuneCancel    context.CancelFunc
+	tuneStopped   bool
+	startCancel   context.CancelFunc
+	generation    uint64
+	stopped       bool
 }
 
 func NewEngine() *Engine { return &Engine{} }
@@ -62,6 +63,10 @@ func (e *Engine) Start(profile string, port int, protector Protector) error {
 	if err != nil {
 		return err
 	}
+	// Android uses automatic control even for profiles saved by older builds.
+	p.Adaptive = true
+	p.ResolverSettings = nil
+	p.Window = 8
 	// Startup has a deadline, but the connected client lives until Stop.
 	clientCtx, clientCancel := context.WithCancel(context.Background())
 	stop := context.AfterFunc(ctx, clientCancel)
@@ -71,6 +76,7 @@ func (e *Engine) Start(profile string, port int, protector Protector) error {
 		clientCancel()
 		return err
 	}
+	c.SetDiagnostics(false)
 	if err = c.Probe(ctx); err != nil {
 		clientCancel()
 		c.Close()
@@ -99,11 +105,15 @@ func (e *Engine) Stop() {
 	e.mu.Lock()
 	e.stopped = true
 	cancel, c, l := e.startCancel, e.client, e.listener
+	latencyCancel := e.latencyCancel
 	e.startCancel, e.client, e.listener = nil, nil, nil
 	e.generation++
 	e.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+	if latencyCancel != nil {
+		latencyCancel()
 	}
 	if l != nil {
 		l.Close()
@@ -119,7 +129,24 @@ func (e *Engine) Stats() string {
 	if c == nil {
 		return "{}"
 	}
+	return c.SummaryJSON()
+}
+func (e *Engine) DebugStats() string {
+	e.mu.Lock()
+	c := e.client
+	e.mu.Unlock()
+	if c == nil || !c.DiagnosticsEnabled() {
+		return "{}"
+	}
 	return c.StatsJSON()
+}
+func (e *Engine) SetDiagnostics(enabled bool) {
+	e.mu.Lock()
+	c := e.client
+	e.mu.Unlock()
+	if c != nil {
+		c.SetDiagnostics(enabled)
+	}
 }
 func (e *Engine) Scan(options string, protector Protector, events Events) error {
 	var o core.ScanOptions
@@ -152,15 +179,28 @@ func (e *Engine) TestLatency(profile string, events Events) error {
 	}
 	p.Automatic = false
 	p.Adaptive = false
-	c, err := core.NewClient(p, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	e.mu.Lock()
+	if e.stopped {
+		e.mu.Unlock()
+		cancel()
+		return context.Canceled
+	}
+	e.latencyCancel = cancel
+	e.mu.Unlock()
+	defer func() { cancel(); e.mu.Lock(); e.latencyCancel = nil; e.mu.Unlock() }()
+	c, err := core.NewClientContext(ctx, p, nil)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	c.TestLatency(ctx, func(h core.ResolverHealth) { b, _ := json.Marshal(h); events.OnEvent(string(b)) })
-	return nil
+	c.TestLatency(ctx, func(h core.ResolverHealth) {
+		if events != nil {
+			b, _ := json.Marshal(h)
+			events.OnEvent(string(b))
+		}
+	})
+	return ctx.Err()
 }
 
 // FindOptimalParameters uses protected sockets when the VPN is active. Its

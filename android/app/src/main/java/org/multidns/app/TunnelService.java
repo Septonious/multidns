@@ -12,11 +12,38 @@ import org.json.*;
 public final class TunnelService extends VpnService {
   static volatile String state = "Disconnected";
   static volatile String stats = "{}";
+  static volatile String debugStats = "{}";
+  static volatile boolean debugEnabled, uiVisible;
+
+  static void diagnostics(android.content.Context context, boolean enabled) {
+    debugEnabled = enabled;
+    context.getSharedPreferences("ui", 0).edit().putBoolean("debug", enabled).apply();
+    TunnelService live = instance;
+    if (live != null && live.engine != null) live.engine.setDiagnostics(enabled);
+    if (!enabled) debugStats = "{}";
+  }
+
   static volatile TunnelService instance;
   private volatile boolean stopping;
   private Engine engine;
   private ParcelFileDescriptor tun;
   private Thread nativeThread;
+  private boolean collectingStats;
+  private final java.util.concurrent.ExecutorService snapshots =
+      java.util.concurrent.Executors.newSingleThreadExecutor();
+
+  static void refreshVisible() {
+    uiVisible = true;
+    TunnelService live = instance;
+    if (live != null)
+      live.handler.post(
+          () -> {
+            if (live.stopping) return;
+            live.handler.removeCallbacks(live.tick);
+            if (!live.collectingStats) live.handler.post(live.tick);
+          });
+  }
+
   private ConnectivityManager connectivity;
   private volatile Network network;
   private ConnectivityManager.NetworkCallback callback;
@@ -68,6 +95,8 @@ public final class TunnelService extends VpnService {
     instance = this;
     state = "Connecting";
     stats = "{}";
+    debugStats = "{}";
+    debugEnabled = getSharedPreferences("ui", 0).getBoolean("debug", false);
     try {
       startForeground(1, notification(this, "MultiDNS · Connecting", 1));
       engine = Mobile.newEngine();
@@ -122,6 +151,7 @@ public final class TunnelService extends VpnService {
                   NativeTunnel.ensureLoaded();
                   if (stopping) return;
                   current.start(config, 10808, fd -> protectFD((int) fd));
+                  current.setDiagnostics(debugEnabled);
                   handler.post(() -> establish(config));
                 } catch (Exception | LinkageError e) {
                   handler.post(() -> connectionFailed("Connection", e));
@@ -213,19 +243,22 @@ public final class TunnelService extends VpnService {
         public void run() {
           final Engine current = engine;
           if (current == null || stopping) return;
-          new Thread(
-                  () -> {
-                    String snapshot = current.stats();
-                    handler.post(
-                        () -> {
-                          if (!stopping) {
-                            stats = snapshot;
-                            handler.postDelayed(tick, 1000);
-                          }
-                        });
-                  },
-                  "multidns-stats")
-              .start();
+          if (collectingStats) return;
+          collectingStats = true;
+          snapshots.execute(
+              () -> {
+                String snapshot = current.stats();
+                String detailed = debugEnabled ? current.debugStats() : "{}";
+                handler.post(
+                    () -> {
+                      collectingStats = false;
+                      if (!stopping) {
+                        stats = snapshot;
+                        debugStats = debugEnabled ? detailed : "{}";
+                        handler.postDelayed(tick, uiVisible || debugEnabled ? 1000 : 5000);
+                      }
+                    });
+              });
         }
       };
 
@@ -296,6 +329,7 @@ public final class TunnelService extends VpnService {
         !state.startsWith("Connection failed") && !state.equals("VPN permission revoked");
     if (normal) state = "Disconnecting";
     handler.removeCallbacks(tick);
+    snapshots.shutdownNow();
     if (connectivity != null && callback != null) {
       try {
         connectivity.unregisterNetworkCallback(callback);

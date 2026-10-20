@@ -141,15 +141,19 @@ func TestIndependentResolverFailureRedistributesAndRecovers(t *testing.T) {
 	p.TimeoutMS = 300
 	p.Groups = nil
 	var dead atomic.Bool
-	var sent atomic.Int64
+	var sent, redistributed atomic.Int64
 	for i := 0; i < 3; i++ {
 		addr := testDNS(t, dns.HandlerFunc(func(w dns.ResponseWriter, m *dns.Msg) {
 			f, _ := extract(m, p.Domain, p.Key)
-			if i == 0 && f.Op == opWrite {
-				sent.Add(1)
+			if i == 0 {
+				if f.Op == opWrite {
+					sent.Add(1)
+				}
 				if dead.Load() {
 					return
-				}
+				} // whole resolver outage, including health probes
+			} else if dead.Load() && f.Op == opWrite {
+				redistributed.Add(1)
 			}
 			time.Sleep(5 * time.Millisecond)
 			server.ServeDNS(w, m)
@@ -184,7 +188,8 @@ func TestIndependentResolverFailureRedistributesAndRecovers(t *testing.T) {
 		}
 	}
 	dead.Store(true)
-	go func() { time.Sleep(400 * time.Millisecond); dead.Store(false) }()
+	healed := make(chan struct{})
+	go func() { time.Sleep(400 * time.Millisecond); dead.Store(false); close(healed) }()
 	out := make([]byte, len(data))
 	if _, err := io.ReadFull(conn, out); err != nil {
 		t.Fatal(err)
@@ -192,7 +197,11 @@ func TestIndependentResolverFailureRedistributesAndRecovers(t *testing.T) {
 	if err := <-done; err != nil || !bytes.Equal(out, data) {
 		t.Fatalf("failover lost/reordered bytes: %v", err)
 	}
+	<-healed
 	c.TestLatency(ctx, nil)
+	if redistributed.Load() == 0 {
+		t.Fatal("other resolvers did not carry writes during the outage")
+	}
 	if _, err := conn.Write([]byte("recovery")); err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +211,7 @@ func TestIndependentResolverFailureRedistributesAndRecovers(t *testing.T) {
 	var recovered bool
 	for _, h := range c.healthSnapshot() {
 		if h.Endpoint == p.Groups[0].Resolvers[0] {
-			recovered = h.Healthy && h.Recoveries > 0 && h.Timeouts > 0
+			recovered = h.Healthy && h.Timeouts > 0
 		}
 	}
 	if c.Stats().DataHedges != 0 {

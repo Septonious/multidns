@@ -14,13 +14,24 @@ android {
   testInstrumentationRunner 'org.multidns.app.SmokeInstrumentation'
   minSdk 24
   targetSdk 35
-  versionCode 10
-  versionName '0.3.3'
+  versionCode 11
+  versionName '0.3.4'
   ndk { abiFilters 'arm64-v8a', 'x86_64' }
   externalNativeBuild { ndkBuild { arguments "HEV_PATH=${rootProject.projectDir.parentFile}/build-deps/hev", 'APP_SUPPORT_FLEXIBLE_PAGE_SIZES=true' } }
  }
  externalNativeBuild { ndkBuild { path file('src/main/cpp/Android.mk') } }
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+ testOptions { unitTests.includeAndroidResources = true }
  lint { abortOnError true }
 }
-dependencies { implementation files('libs/multidns.aar') }
+dependencies {
+ implementation files('libs/multidns.aar')
+ testImplementation 'junit:junit:4.13.2'
+ testImplementation 'org.robolectric:robolectric:4.14.1'
+}
+tasks.withType(Test).configureEach {
+ systemProperty 'robolectric.dependency.repo.url','https://repo.maven.apache.org/maven2'
+ systemProperty 'robolectric.graphicsMode','NATIVE'
+ maxHeapSize='2g'
+ System.getenv('MULTIDNS_UI_JVM_PROPS')?.split('\n')?.each { jvmArgs it }
+}

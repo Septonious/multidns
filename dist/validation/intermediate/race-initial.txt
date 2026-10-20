@@ -1,0 +1,9 @@
+?   	github.com/Septonious/multidns/cmd/client	[no test files]
+?   	github.com/Septonious/multidns/cmd/scanner	[no test files]
+?   	github.com/Septonious/multidns/cmd/server	[no test files]
+--- FAIL: TestIdlePollingStaysBounded (1.66s)
+    stability_test.go:54: idle stream kept a bulk polling window alive: 44 DNS queries in 500ms
+FAIL
+FAIL	github.com/Septonious/multidns/core	43.749s
+ok  	github.com/Septonious/multidns/mobile	1.805s
+FAIL

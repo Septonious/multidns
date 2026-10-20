@@ -76,3 +76,35 @@ func TestCancelParameterTestBeforeWorkerStarts(t *testing.T) {
 		t.Fatalf("early cancel ignored: %v %s", err, report)
 	}
 }
+
+type latencyEvents struct{}
+
+func (latencyEvents) OnEvent(string) {}
+
+func TestStopCancelsLatencyTest(t *testing.T) {
+	packet, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer packet.Close()
+	seen := make(chan struct{})
+	go func() { b := make([]byte, 4096); packet.ReadFrom(b); close(seen) }()
+	profile, _ := json.Marshal(core.Profile{Domain: "t.test", Key: "0123456789abcdef", Groups: []core.Group{{Resolvers: []string{packet.LocalAddr().String()}}}, TimeoutMS: 30000})
+	engine := NewEngine()
+	done := make(chan error, 1)
+	go func() { done <- engine.TestLatency(string(profile), latencyEvents{}) }()
+	select {
+	case <-seen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("test did not start")
+	}
+	engine.Stop()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled latency test reported success")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("latency test ignored cancellation")
+	}
+}

@@ -11,6 +11,9 @@ import (
 // prevent ten busy streams from flooding the same recursive resolver.
 // Admission happens before global slots and before starting an exchange timer.
 type pathState struct {
+	streams                                 map[uint32]int
+	lastIssue                               time.Time
+	lastSuccess                             time.Time
 	lastLoss                                time.Time
 	lossBurst                               int
 	lastCutMild                             bool

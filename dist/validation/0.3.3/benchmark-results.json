@@ -1,0 +1,78 @@
+{
+  "0.3.2": [
+    {
+      "queued": false,
+      "bulk_seconds": 11.4095004,
+      "app-max-ms": 461.3,
+      "app-p95-ms": 236.6,
+      "app-p99-ms": 434.6,
+      "app-samples": 79.0,
+      "queries": 6652.0,
+      "retries": 86.0,
+      "timeouts": 86.0,
+      "upload_mbps": 0.3676150447393823
+    },
+    {
+      "queued": true,
+      "bulk_seconds": 11.809065851,
+      "app-max-ms": 715.4,
+      "app-p95-ms": 240.8,
+      "app-p99-ms": 557.5,
+      "app-samples": 78.0,
+      "queries": 6685.0,
+      "retries": 88.0,
+      "timeouts": 88.0,
+      "upload_mbps": 0.3551766120132884
+    }
+  ],
+  "0.3.3": [
+    {
+      "queued": false,
+      "bulk_seconds": 3.710441878,
+      "app-max-ms": 303.1,
+      "app-p95-ms": 191.6,
+      "app-p99-ms": 295.7,
+      "app-samples": 28.0,
+      "queries": 5700.0,
+      "retries": 78.0,
+      "timeouts": 81.0,
+      "upload_mbps": 1.1304055252472547
+    },
+    {
+      "queued": false,
+      "bulk_seconds": 4.998029932,
+      "app-max-ms": 384.3,
+      "app-p95-ms": 197.8,
+      "app-p99-ms": 260.6,
+      "app-samples": 35.0,
+      "queries": 5839.0,
+      "retries": 75.0,
+      "timeouts": 76.0,
+      "upload_mbps": 0.8391914528454248
+    },
+    {
+      "queued": true,
+      "bulk_seconds": 6.799966834,
+      "app-max-ms": 781.7,
+      "app-p95-ms": 343.8,
+      "app-p99-ms": 443.1,
+      "app-samples": 38.0,
+      "queries": 5865.0,
+      "retries": 113.0,
+      "timeouts": 114.0,
+      "upload_mbps": 0.6168124201765776
+    },
+    {
+      "queued": true,
+      "bulk_seconds": 6.122885496,
+      "app-max-ms": 349.1,
+      "app-p95-ms": 189.7,
+      "app-p99-ms": 262.2,
+      "app-samples": 39.0,
+      "queries": 5920.0,
+      "retries": 78.0,
+      "timeouts": 78.0,
+      "upload_mbps": 0.685020812938619
+    }
+  ]
+}

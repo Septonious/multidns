@@ -9,14 +9,31 @@ import android.widget.*;
 
 /** Small native design system. No web views or third-party UI runtime. */
 final class Ui {
-  static final int BG = 0xff101617,
-      INK = 0xffe7efed,
-      MUTED = 0xffa5b7b1,
-      ACCENT = 0xff78dac0,
-      SOFT = 0xff173c35,
-      LINE = 0xff304341,
-      SURFACE = 0xff192224,
-      ON_ACCENT = 0xff09231d;
+  static final int BG = 0xff0b1020,
+      INK = 0xffedf2ff,
+      MUTED = 0xff93a3bd,
+      ACCENT = 0xff72bcff,
+      SOFT = 0xff1a2d47,
+      LINE = 0xff26334b,
+      SURFACE = 0xff131c2e,
+      ON_ACCENT = 0xff081d33,
+      GREEN = 0xff63dba6,
+      YELLOW = 0xffffc46b,
+      RED = 0xffff7f93,
+      PURPLE = 0xffb7a2ff;
+
+  static int tint(int color) {
+    return (color & 0x00ffffff) | 0x14000000;
+  }
+
+  static void icon(TextView view, int resource, int color) {
+    android.graphics.drawable.Drawable d = view.getContext().getDrawable(resource).mutate();
+    d.setTint(color);
+    int size = dp(view.getContext(), 18);
+    d.setBounds(0, 0, size, size);
+    view.setCompoundDrawablesRelative(d, null, null, null);
+    view.setCompoundDrawablePadding(dp(view.getContext(), 10));
+  }
 
   static int dp(Context c, int n) {
     return Math.round(n * c.getResources().getDisplayMetrics().density);
@@ -32,7 +49,7 @@ final class Ui {
 
   static android.graphics.drawable.Drawable ripple(Context c, int color, int radius, int border) {
     return new RippleDrawable(
-        ColorStateList.valueOf(0x2878dac0), shape(c, color, radius, border), null);
+        ColorStateList.valueOf(0x2872bcff), shape(c, color, radius, border), null);
   }
 
   static TextView label(Context c, String s, int size, int color, boolean bold) {
@@ -61,7 +78,7 @@ final class Ui {
     b.setMinWidth(0);
     b.setMinimumWidth(0);
     b.setPadding(dp(c, 16), dp(c, 10), dp(c, 16), dp(c, 10));
-    b.setBackground(ripple(c, primary ? ACCENT : SURFACE, 16, primary ? 0 : LINE));
+    b.setBackground(ripple(c, primary ? ACCENT : SOFT, 12, 0));
     b.setStateListAnimator(null);
   }
 

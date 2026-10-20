@@ -1,0 +1,7 @@
+?   	github.com/Septonious/multidns/cmd/client	[no test files]
+?   	github.com/Septonious/multidns/cmd/scanner	[no test files]
+?   	github.com/Septonious/multidns/cmd/server	[no test files]
+signal: interrupt
+FAIL	github.com/Septonious/multidns/core	39.596s
+ok  	github.com/Septonious/multidns/mobile	1.042s
+FAIL

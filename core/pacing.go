@@ -49,6 +49,9 @@ func (c *Client) paceUpload(ctx context.Context, addr string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if !c.diagnostics.Load() {
+		return nil
+	}
 	c.adaptiveMu.Lock()
 	if h := c.health[addr]; h != nil {
 		h.PacedQueries++

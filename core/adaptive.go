@@ -8,11 +8,18 @@ import (
 	"sort"
 	"sync"
 	"time"
-
-	"github.com/miekg/dns"
 )
 
 type ResolverHealth struct {
+	AssignedStreams int     `json:"assigned_streams"`
+	TXQueries       uint64  `json:"tx_queries"`
+	RXQueries       uint64  `json:"rx_queries"`
+	TXTimeouts      uint64  `json:"tx_timeouts"`
+	RXTimeouts      uint64  `json:"rx_timeouts"`
+	HealthDowns     uint64  `json:"health_downs"`
+	SlotWaitMS      float64 `json:"slot_wait_ms"`
+	MaxSlotWaitMS   float64 `json:"max_slot_wait_ms"`
+
 	PacingWaitMS        float64 `json:"pacing_wait_ms"`
 	PacedQueries        uint64  `json:"paced_queries"`
 	RecentLossPercent   float64 `json:"recent_loss_percent"`
@@ -110,6 +117,7 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 		copy.TXWorkers = settings.TXWorkers
 		copy.RXWorkers = settings.RXWorkers
 		if p := c.paths[h.Endpoint]; p != nil {
+			copy.AssignedStreams = len(p.streams)
 			copy.CapacityBudgetCuts = p.budgetCuts
 			if p.outcomeCount > 0 {
 				copy.RecentLossPercent = 100 * float64(p.outcomeLosses) / float64(p.outcomeCount)
@@ -133,10 +141,13 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 // timeout as a ceiling; unknown or failing paths retain that full timeout.
 func (c *Client) exchangeTimeout(addr string, op byte) time.Duration {
 	ceiling := time.Duration(c.Profile.TimeoutMS) * time.Millisecond
+	if op == opProbe {
+		return min(ceiling, 700*time.Millisecond)
+	}
 	c.adaptiveMu.Lock()
 	h := c.health[addr]
 	rtt, variance := 0.0, 0.0
-	if h != nil && h.Healthy && h.Failures == 0 {
+	if h != nil && h.Healthy {
 		rtt = h.RTTMS
 		variance = h.RTTVarianceMS
 		if op == opWrite {
@@ -154,12 +165,9 @@ func (c *Client) exchangeTimeout(addr string, op byte) time.Duration {
 		return min(ceiling, max(160*time.Millisecond, time.Duration(2*rtt+max(25, 4*variance))*time.Millisecond))
 	}
 	if op == opRead {
-		return min(ceiling, max(200*time.Millisecond, time.Duration(2*rtt+max(25, 4*variance)+80)*time.Millisecond))
+		return min(ceiling, max(350*time.Millisecond, time.Duration(2*rtt+max(50, 4*variance)+80)*time.Millisecond))
 	}
 	allowance := 100 * time.Millisecond
-	if op == opRead {
-		allowance += 80 * time.Millisecond
-	}
 	estimate := max(300*time.Millisecond, time.Duration(max(4*rtt, rtt+4*variance))*time.Millisecond+allowance)
 	return min(ceiling, estimate)
 }
@@ -194,6 +202,11 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		switch failureKind(err) {
 		case "timeout":
 			h.Timeouts++
+			if op == opWrite {
+				h.TXTimeouts++
+			} else if op == opRead {
+				h.RXTimeouts++
+			}
 		case "dns":
 			h.DNSErrors++
 		case "invalid":
@@ -201,10 +214,23 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		default:
 			h.SocketErrors++
 		}
-		// Quarantine after the first observed failure. Outstanding accepted
-		// chunks keep their ARQ sequence; new/queued chunks use other paths.
-		h.Healthy = false
-		c.pathLocked(addr).retryAt = time.Now().Add(300 * time.Millisecond)
+		// Reachability is not a per-packet loss flag. Other authenticated ACKs
+		// prove that a resolver is still alive even while one datagram expires.
+		// Three failed exchanges with no recent progress open the circuit;
+		// their ARQ retries are already free to use every other live path.
+		path := c.pathLocked(addr)
+		path.lastIssue = time.Now()
+		// Briefly route new work elsewhere without displaying a disconnect.
+		// This also stops an overloaded recursor accumulating a fresh burst.
+		path.retryAt = time.Now().Add(time.Duration(min(100, max(25, h.RTTMS/2)) * float64(time.Millisecond)))
+		quiet := max(150*time.Millisecond, time.Duration(3*h.RTTMS*float64(time.Millisecond)))
+		if h.Failures >= 3 && time.Since(path.lastSuccess) >= quiet {
+			if h.Healthy {
+				h.HealthDowns++
+			}
+			h.Healthy = false
+			path.retryAt = time.Now().Add(300 * time.Millisecond)
+		}
 		c.wakeAdmissionsLocked()
 		return
 	}
@@ -212,6 +238,7 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		h.Recoveries++
 	}
 	h.Healthy = true
+	c.pathLocked(addr).lastSuccess = time.Now()
 	h.Replies++
 	if op == opWrite {
 		h.Uploaded += uint64(size)
@@ -220,7 +247,7 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		h.Downloaded += uint64(size)
 	}
 	h.Failures = 0
-	c.wakeAdmissionsLocked()
+	// Physical lease release wakes the next waiter; do not broadcast twice.
 	// A successful idle long-poll includes server wait time, not network RTT.
 	if op != opRead || size > 0 {
 		rtt := float64(elapsed.Microseconds()) / 1000
@@ -345,8 +372,9 @@ func (c *Client) measure(ctx context.Context, addr string) ResolverHealth {
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, time.Duration(min(c.Profile.TimeoutMS, 700))*time.Millisecond)
 		start := time.Now()
-		dc := &dns.Client{Net: "udp", Timeout: 700 * time.Millisecond, Dialer: c.dialer}
-		reply, _, e := dc.ExchangeContext(probeCtx, m, addr)
+		// Reuse the protected resolver socket. The tracked transport interrupts
+		// a canceled probe immediately, unlike a fresh DNS Client read deadline.
+		reply, e, _ := c.exchangeDNSTracked(probeCtx, m, addr, "udp", opProbe)
 		cancel()
 		if e == nil {
 			r, err := parseResponse(reply, c.Profile.Key)
@@ -373,6 +401,9 @@ func (c *Client) measure(ctx context.Context, addr string) ResolverHealth {
 
 // TestLatency concurrently checks the whole pool and streams completed results.
 func (c *Client) TestLatency(ctx context.Context, emit func(ResolverHealth)) {
+	c.testLatency(ctx, emit, false)
+}
+func (c *Client) testLatency(ctx context.Context, emit func(ResolverHealth), skipActive bool) {
 	pool := c.Profile.ResolverPool()
 	jobs := make(chan string)
 	var wg sync.WaitGroup
@@ -391,7 +422,18 @@ func (c *Client) TestLatency(ctx context.Context, emit func(ResolverHealth)) {
 						old.Failures = 0
 						old.Recoveries++
 					}
+					// Do not let two tiny lost probes erase concurrent payload
+					// progress (or a reply newer than this probe run).
+					if !h.Healthy && time.Since(c.pathLocked(addr).lastSuccess) < time.Second {
+						h.Healthy = old.Healthy
+					}
+					if old.Healthy && !h.Healthy {
+						old.HealthDowns++
+					}
 					old.Healthy = h.Healthy
+					if h.Healthy {
+						old.Failures = 0
+					}
 					if old.RTTMS == 0 {
 						old.RTTMS = h.RTTMS
 						old.RTTVarianceMS = h.RTTMS / 2
@@ -410,6 +452,15 @@ func (c *Client) TestLatency(ctx context.Context, emit func(ResolverHealth)) {
 	}
 loop:
 	for _, addr := range pool {
+		if skipActive {
+			c.adaptiveMu.Lock()
+			h, p := c.health[addr], c.paths[addr]
+			recent := h != nil && h.Healthy && p != nil && time.Since(p.lastSuccess) < 3*time.Second
+			c.adaptiveMu.Unlock()
+			if recent {
+				continue
+			}
+		}
 		select {
 		case jobs <- addr:
 		case <-ctx.Done():
@@ -474,7 +525,7 @@ func (c *Client) maintain() {
 			return
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(c.ctx, 12*time.Second)
-			c.TestLatency(ctx, nil)
+			c.testLatency(ctx, nil, true)
 			cancel()
 			if c.Profile.Automatic {
 				c.regroup()

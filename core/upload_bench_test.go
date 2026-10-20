@@ -20,21 +20,36 @@ import (
 // A separate application echo and 26 idle sessions share all DNS paths.
 func BenchmarkUploadLoadedRTT(b *testing.B) {
 	for _, queued := range []bool{false, true} {
-		b.Run(fmt.Sprintf("queue-%t", queued), func(b *testing.B) { benchmarkUpload(b, queued) })
+		b.Run(fmt.Sprintf("queue-%t", queued), func(b *testing.B) { benchmarkUpload(b, queued, 8) })
 	}
 }
-func benchmarkUpload(b *testing.B, queued bool) {
+func BenchmarkLargePoolUploadLoadedRTT(b *testing.B) {
+	for _, count := range []int{8, 20} {
+		b.Run(fmt.Sprintf("paths-%d", count), func(b *testing.B) { benchmarkUpload(b, false, count) })
+	}
+}
+func BenchmarkPoolCapacity(b *testing.B) {
+	for _, count := range []int{8, 20} {
+		b.Run(fmt.Sprintf("paths-%d", count), func(b *testing.B) { benchmarkUpload(b, false, count, 0, 512*1024) })
+	}
+}
+func benchmarkUpload(b *testing.B, queued bool, pathCount int, options ...int) {
+	lossEvery, payloadBytes := int64(71), 128*1024
+	if len(options) > 0 {
+		lossEvery = int64(options[0])
+		payloadBytes = options[1]
+	}
 	p, server := testProfile(b)
 	p.Adaptive = true
 	p.TimeoutMS = 1200
 	p.Groups = nil
-	for i := 0; i < 8; i++ {
+	for i := 0; i < pathCount; i++ {
 		var active, requests atomic.Int64
-		delay := time.Duration([]int{35, 40, 45, 50, 55, 60, 75, 90}[i]) * time.Millisecond
+		delay := time.Duration([]int{35, 40, 45, 50, 55, 60, 75, 90}[i%8]) * time.Millisecond
 		addr := testDNS(b, dns.HandlerFunc(func(w dns.ResponseWriter, m *dns.Msg) {
 			f, _ := extract(m, p.Domain, p.Key)
 			if f.Op == opWrite || f.Op == opRead {
-				if requests.Add(1)%71 == 0 {
+				if lossEvery > 0 && requests.Add(1)%lossEvery == 0 {
 					return
 				}
 				n := active.Add(1)
@@ -76,7 +91,7 @@ func benchmarkUpload(b *testing.B, queued bool) {
 	}
 	defer interactive.Close()
 	interactive.SetDeadline(time.Now().Add(90 * time.Second))
-	payload := make([]byte, 128*1024)
+	payload := make([]byte, payloadBytes)
 	for i := range payload {
 		payload[i] = byte(i*17 + i/257)
 	}
@@ -147,6 +162,26 @@ func benchmarkUpload(b *testing.B, queued bool) {
 		}
 	}()
 	b.SetBytes(int64(len(payload) * len(conns)))
+	var peakData atomic.Int64
+	sampleDone := make(chan struct{})
+	go func() {
+		defer close(sampleDone)
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				n := int64(len(c.dataSlots))
+				for old := peakData.Load(); n > old; old = peakData.Load() {
+					if peakData.CompareAndSwap(old, n) {
+						break
+					}
+				}
+			}
+		}
+	}()
 	b.ResetTimer()
 	for range b.N {
 		var wg sync.WaitGroup
@@ -177,6 +212,8 @@ func benchmarkUpload(b *testing.B, queued bool) {
 	}
 	b.StopTimer()
 	close(stop)
+	<-sampleDone
+	b.ReportMetric(float64(peakData.Load()), "peak-data-flight")
 	if e := <-echoDone; e != nil {
 		b.Fatal(e)
 	}

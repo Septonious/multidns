@@ -38,7 +38,7 @@ const (
 	largeUploadWindow           = 256
 )
 
-var encoding = base32.StdEncoding.WithPadding(base32.NoPadding)
+var encoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
 
 // Find the largest upload that fits the actual encoded QNAME, including label
 // separators and the authentication header. This is calculated once per client.
@@ -125,7 +125,7 @@ func query(f frame, p Profile) (*dns.Msg, error) {
 	if p.Obfuscation == "xor" {
 		f.XOR = true
 	}
-	text := strings.ToLower(encoding.EncodeToString(f.pack(p.Key)))
+	text := encoding.EncodeToString(f.pack(p.Key))
 	labels := []string{}
 	for len(text) > 0 {
 		n := min(63, len(text))
@@ -151,7 +151,7 @@ func extract(m *dns.Msg, domain, key string) (frame, error) {
 		return frame{}, errors.New("wrong domain")
 	}
 	s := strings.ReplaceAll(strings.TrimSuffix(name, suffix), ".", "")
-	b, e := encoding.DecodeString(strings.ToUpper(s))
+	b, e := encoding.DecodeString(s)
 	if e != nil {
 		return frame{}, e
 	}

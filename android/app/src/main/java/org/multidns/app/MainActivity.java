@@ -21,18 +21,19 @@ public final class MainActivity extends Activity {
   private LinearLayout page, root;
   private ScrollView scroll;
   private TextView downValue, upValue, healthValue, trafficValue;
-  private Button connectButton;
+  private Button connectButton, scanControl;
+  private ImageButton resumeScan;
   private final ArrayList<TextView> navLabels = new ArrayList<>();
   private LinearLayout rateSection;
   private final ArrayList<LinearLayout> navItems = new ArrayList<>();
   private int currentTab;
-  private TextView diagnosticsSummary, tuningOutput;
-  private LinearLayout diagnosticsPaths;
-  private final HashMap<String, TextView> resolverViews = new HashMap<>();
-  private volatile mobile.Engine tuningEngine;
-  private volatile boolean tuningRunning;
-  private String tuningReport, tuningProfile;
-  private Button applyTuning, findTuning, cancelTuning, tuningDetails, copyTuning;
+  private LinearLayout resolverContainer;
+  private final LinkedHashMap<String, ResolverCard> resolverCards = new LinkedHashMap<>();
+  private final LinkedHashMap<String, JSONObject> latencyRows = new LinkedHashMap<>();
+  private LatencyTester latencyTester;
+  private Boolean resolverLive;
+  private Button latencyButton, cancelLatency, debugCopy;
+  private final ArrayList<ImageView> navIcons = new ArrayList<>();
 
   private boolean editing;
   private TextView dashboard, scanStatus, scanResults;
@@ -43,13 +44,13 @@ public final class MainActivity extends Activity {
   private boolean exportingScan;
   private boolean latencyRunning;
   private boolean scanRefreshing;
-  private TextView latencyResults;
   private long statsAt, statsUploaded, statsDownloaded;
   private final Runnable refresh =
       new Runnable() {
         public void run() {
           if (dashboard != null) updateDashboard();
-          if (diagnosticsSummary != null) updateDiagnostics();
+          if (scanControl != null) updateScanControl();
+          if (resolverContainer != null) updateResolverCards();
           if (scanStatus != null)
             scanStatus.setText(
                 ScannerService.state
@@ -96,6 +97,10 @@ public final class MainActivity extends Activity {
     getWindow().getDecorView().setSystemUiVisibility(0);
     try {
       profiles = ProfileStore.load(this);
+      for (int i = 0; i < profiles.length(); i++) {
+        profiles.getJSONObject(i).remove("resolver_settings");
+        profiles.getJSONObject(i).put("adaptive", true);
+      }
       if (profiles.length() > 0)
         selected = Math.min(profiles.length() - 1, getPreferences(0).getInt("selected", 0));
     } catch (Exception e) {
@@ -105,7 +110,6 @@ public final class MainActivity extends Activity {
     servers();
     if (Build.VERSION.SDK_INT >= 33)
       requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, 99);
-    handler.post(refresh);
   }
 
   private int dp(int n) {
@@ -116,6 +120,7 @@ public final class MainActivity extends Activity {
     root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
     root.setBackgroundColor(Ui.BG);
+    root.setFocusableInTouchMode(true);
     root.setOnApplyWindowInsetsListener(
         (v, insets) -> {
           if (Build.VERSION.SDK_INT >= 30) {
@@ -162,18 +167,28 @@ public final class MainActivity extends Activity {
     LinearLayout nav = new LinearLayout(this);
     nav.setBackground(Ui.shape(this, Ui.SURFACE, 24, Ui.LINE));
     nav.setPadding(dp(4), dp(4), dp(4), dp(4));
-    String[] names = {"Connect", "Scan", "Routing", "Diagnostics"};
+    String[] names = {"Servers", "Scan", "Routing", "Resolvers"};
+    int[] icons = {
+      R.drawable.ic_server, R.drawable.ic_scan, R.drawable.ic_route, R.drawable.ic_dns
+    };
     for (int i = 0; i < names.length; i++) {
       final int tab = i;
       LinearLayout item = new LinearLayout(this);
       item.setOrientation(LinearLayout.VERTICAL);
       item.setGravity(Gravity.CENTER);
-      item.setPadding(dp(6), 0, dp(6), 0);
+      item.setPadding(dp(4), 0, dp(4), 0);
       item.setMinimumHeight(dp(48));
       item.setBackground(Ui.ripple(this, Ui.SURFACE, 18, 0));
-      TextView label = Ui.label(this, names[i], 12, Ui.MUTED, true);
+      TextView label = Ui.label(this, names[i], 10, Ui.MUTED, true);
       label.setMaxLines(1);
       label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+      ImageView icon = new ImageView(this);
+      icon.setImageResource(icons[i]);
+      icon.setImageTintList(android.content.res.ColorStateList.valueOf(Ui.MUTED));
+      LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(20), dp(20));
+      ip.bottomMargin = dp(4);
+      item.addView(icon, ip);
+      navIcons.add(icon);
       item.addView(label);
       item.setContentDescription(names[i]);
       item.setFocusable(true);
@@ -184,12 +199,12 @@ public final class MainActivity extends Activity {
             else if (tab == 2) routing();
             else diagnostics();
           });
-      nav.addView(item, new LinearLayout.LayoutParams(0, -1, Math.max(8, names[i].length() + 4)));
+      nav.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
       navLabels.add(label);
 
       navItems.add(item);
     }
-    LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, dp(56));
+    LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, dp(64));
     np.setMargins(dp(16), 0, dp(16), dp(8));
     root.addView(nav, np);
     setContentView(root);
@@ -202,6 +217,10 @@ public final class MainActivity extends Activity {
       navItems.get(i).setBackground(Ui.ripple(this, i == tab ? Ui.SOFT : Ui.SURFACE, 18, 0));
       navItems.get(i).setSelected(i == tab);
       navLabels.get(i).setTextColor(i == tab ? Ui.ACCENT : Ui.MUTED);
+      navIcons
+          .get(i)
+          .setImageTintList(
+              android.content.res.ColorStateList.valueOf(i == tab ? Ui.ACCENT : Ui.MUTED));
     }
   }
 
@@ -282,13 +301,18 @@ public final class MainActivity extends Activity {
   }
 
   private void clear() {
+    root.requestFocus();
+    ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
+        .hideSoftInputFromWindow(root.getWindowToken(), 0);
+    scanControl = null;
+    resumeScan = null;
     editing = false;
-    diagnosticsSummary = null;
-    diagnosticsPaths = null;
-    resolverViews.clear();
-    tuningOutput = null;
-    applyTuning = null;
-    findTuning = cancelTuning = tuningDetails = copyTuning = null;
+    resolverContainer = null;
+    resolverCards.clear();
+    resolverLive = null;
+    latencyButton = null;
+    cancelLatency = null;
+    debugCopy = null;
     page.removeAllViews();
     scroll.scrollTo(0, 0);
     dashboard = null;
@@ -299,7 +323,6 @@ public final class MainActivity extends Activity {
     trafficValue = null;
     scanStatus = null;
     scanResults = null;
-    latencyResults = null;
     rateSection = null;
     statsAt = 0;
   }
@@ -311,7 +334,12 @@ public final class MainActivity extends Activity {
             || state.equals("Connecting")
             || state.equals("Disconnecting");
     dashboard.setText(state.startsWith("Connection failed") ? "Connection failed" : state);
-    dashboard.setTextColor(state.equals("Connected") ? Ui.ACCENT : Ui.INK);
+    dashboard.setTextColor(
+        state.equals("Connected")
+            ? Ui.GREEN
+            : state.startsWith("Connection failed")
+                ? Ui.RED
+                : state.equals("Connecting") ? Ui.YELLOW : Ui.MUTED);
     if (connectButton != null) {
       connectButton.setText(
           state.equals("Disconnecting")
@@ -320,7 +348,11 @@ public final class MainActivity extends Activity {
                   ? (state.equals("Connecting") ? "Cancel connection" : "Disconnect")
                   : "Connect");
       connectButton.setEnabled(!state.equals("Disconnecting") && (busy || profile() != null));
-      Ui.styleButton(connectButton, !busy); // Keep one unambiguous connection control.
+      Ui.styleButton(connectButton, !busy);
+      Ui.icon(
+          connectButton,
+          busy ? R.drawable.ic_stop : R.drawable.ic_power,
+          busy ? Ui.RED : Ui.ON_ACCENT); // Keep one unambiguous connection control.
     }
     connectionSummary();
     if (state.startsWith("Connection failed") && trafficValue != null) trafficValue.setText(state);
@@ -329,7 +361,7 @@ public final class MainActivity extends Activity {
   private String connectionSummary() {
     try {
       JSONObject stats = new JSONObject(TunnelService.stats);
-      if (!stats.has("queries")) {
+      if (!stats.has("uploaded")) {
         statsAt = 0;
         if (downValue != null) downValue.setText("0.00");
         if (upValue != null) upValue.setText("0.00");
@@ -354,8 +386,12 @@ public final class MainActivity extends Activity {
       JSONArray groups = stats.optJSONArray("groups");
       JSONArray resolvers = stats.optJSONArray("resolvers");
       int healthy = 0;
-      for (int i = 0; resolvers != null && i < resolvers.length(); i++)
-        if (resolvers.getJSONObject(i).optBoolean("healthy")) healthy++;
+      for (int i = 0; resolvers != null && i < resolvers.length(); i++) {
+        JSONObject resolver = resolvers.getJSONObject(i);
+        if (resolver.optString("state").equals("green")
+            || resolver.optString("status").equals("Degraded")
+            || resolver.optString("status").equals("Standby")) healthy++;
+      }
       if (downValue != null) downValue.setText(String.format(Locale.US, "%.2f", downloadRate));
       if (upValue != null) upValue.setText(String.format(Locale.US, "%.2f", uploadRate));
       if (healthValue != null)
@@ -364,22 +400,12 @@ public final class MainActivity extends Activity {
                 + "/"
                 + (resolvers == null ? 0 : resolvers.length())
                 + " resolvers reachable  ·  "
-                + (groups == null ? 0 : groups.length())
+                + stats.optInt("group_count", 0)
                 + " groups");
       if (trafficValue != null)
         trafficValue.setText(
             String.format(
-                Locale.US,
-                "Downloaded %.1f MB  ·  Uploaded %.1f MB\n"
-                    + "%d active streams   ·   %d retries (%.1f%%)\n"
-                    + "%d timeouts   ·   %d DNS errors",
-                down / 1000000.0,
-                up / 1000000.0,
-                stats.optLong("streams"),
-                stats.optLong("retries"),
-                stats.optLong("retries") * 100.0 / Math.max(1, stats.optLong("exchanges")),
-                stats.optLong("timeouts"),
-                stats.optLong("dns_errors")));
+                Locale.US, "%.1f MB received  ·  %.1f MB sent", down / 1000000.0, up / 1000000.0));
       return "";
     } catch (JSONException e) {
       return "Waiting for connection statistics";
@@ -396,7 +422,19 @@ public final class MainActivity extends Activity {
   private Button button(LinearLayout parent, String title, Runnable action) {
     Button b = new Button(this);
     b.setText(title);
-    Ui.styleButton(b, title.startsWith("Save") || title.equals("Start scan"));
+    boolean primary = title.startsWith("Save") || title.equals("Start scan");
+    Ui.styleButton(b, primary);
+    int icon =
+        title.startsWith("Save")
+            ? R.drawable.ic_check
+            : title.startsWith("Copy")
+                ? R.drawable.ic_copy
+                : title.startsWith("Add")
+                    ? R.drawable.ic_plus
+                    : title.contains("scan")
+                        ? R.drawable.ic_scan
+                        : title.startsWith("Test") ? R.drawable.ic_pulse : 0;
+    if (icon != 0) Ui.icon(b, icon, primary ? Ui.ON_ACCENT : Ui.ACCENT);
     b.setOnClickListener(
         v -> {
           try {
@@ -442,52 +480,74 @@ public final class MainActivity extends Activity {
   private void save() {
     try {
       ProfileStore.save(this, profiles);
+      getPreferences(0).edit().putInt("selected", selected).apply();
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
   }
 
+  private boolean connected() {
+    return TunnelService.instance != null;
+  }
+
+  private ImageButton iconButton(
+      LinearLayout parent, int resource, String description, Runnable action) {
+    ImageButton button = new ImageButton(this);
+    button.setImageResource(resource);
+    button.setImageTintList(android.content.res.ColorStateList.valueOf(Ui.ACCENT));
+    button.setBackground(Ui.ripple(this, Ui.SOFT, 12, 0));
+    button.setPadding(dp(12), dp(12), dp(12), dp(12));
+    button.setContentDescription(description);
+    button.setOnClickListener(
+        v -> {
+          try {
+            action.run();
+          } catch (Exception e) {
+            error(e.getMessage());
+          }
+        });
+    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(48));
+    lp.leftMargin = dp(8);
+    parent.addView(button, lp);
+    return button;
+  }
+
+  private void importProfile() {
+    if (connected()) {
+      toast("Disconnect before importing a server");
+      return;
+    }
+    startActivityForResult(
+        new Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .setType("application/json")
+            .addCategory(Intent.CATEGORY_OPENABLE),
+        42);
+  }
+
   private void servers() {
     clear();
     selectTab(0);
-    heading("Connection", "");
     LinearLayout hero = card(page);
-    dashboard = Ui.label(this, TunnelService.state, 23, Ui.INK, true);
+    dashboard = Ui.label(this, TunnelService.state, 18, Ui.INK, true);
     hero.addView(dashboard);
-    if (profile() != null)
-      text(hero, profile().optString("name") + "  ·  " + profile().optString("domain"))
-          .setTextColor(Ui.MUTED);
-    else text(hero, "Add a server to get started.").setTextColor(Ui.MUTED);
-    connectButton =
-        button(
-            hero,
-            "Connect",
-            () -> {
-              if (TunnelService.instance != null || TunnelService.state.equals("Connecting")) {
-                TunnelService.disconnect(this);
-              } else {
-                if (profile() == null) return;
-                if (tuningRunning) {
-                  toast("Finish or cancel parameter discovery before connecting.");
-                  return;
-                }
-                pendingProfile = profile().toString();
-                Intent permission = VpnService.prepare(this);
-                if (permission != null) startActivityForResult(permission, 41);
-                else connect();
-              }
-              updateDashboard();
-            });
+    if (profile() != null) {
+      TextView server = text(hero, profile().optString("name"));
+      server.setTextSize(25);
+      server.setTypeface(
+          android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+      text(hero, profile().optString("domain")).setTextColor(Ui.MUTED);
+    }
     LinearLayout rates = new LinearLayout(this);
     rateSection = rates;
-    rates.setPadding(0, dp(16), 0, dp(12));
+    rates.setPadding(0, dp(16), 0, dp(16));
     LinearLayout left = new LinearLayout(this), right = new LinearLayout(this);
     left.setOrientation(LinearLayout.VERTICAL);
     right.setOrientation(LinearLayout.VERTICAL);
-    text(left, "Download").setTextColor(Ui.MUTED);
-    text(right, "Upload").setTextColor(Ui.MUTED);
-    downValue = Ui.label(this, "0.00", 30, Ui.INK, true);
-    upValue = Ui.label(this, "0.00", 30, Ui.INK, true);
+    TextView dl = text(left, "Download"), ul = text(right, "Upload");
+    Ui.icon(dl, R.drawable.ic_download, Ui.ACCENT);
+    Ui.icon(ul, R.drawable.ic_upload, Ui.PURPLE);
+    downValue = Ui.label(this, "0.00", 30, Ui.ACCENT, true);
+    upValue = Ui.label(this, "0.00", 30, Ui.PURPLE, true);
     left.addView(downValue);
     right.addView(upValue);
     text(left, "Mbps").setTextColor(Ui.MUTED);
@@ -495,116 +555,145 @@ public final class MainActivity extends Activity {
     rates.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
     rates.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
     hero.addView(rates);
+    connectButton =
+        button(
+            hero,
+            "Connect",
+            () -> {
+              if (connected() || TunnelService.state.equals("Connecting"))
+                TunnelService.disconnect(this);
+              else {
+                if (profile() == null) return;
+                stopLatencyTest();
+                try {
+                  JSONObject config = new JSONObject(profile().toString());
+                  config.remove("resolver_settings");
+                  config.put("adaptive", true);
+                  pendingProfile = config.toString();
+                } catch (JSONException e) {
+                  throw new IllegalStateException(e);
+                }
+                Intent permission = VpnService.prepare(this);
+                if (permission != null) startActivityForResult(permission, 41);
+                else connect();
+              }
+              updateDashboard();
+            });
     healthValue = text(hero, "");
-    healthValue.setTextColor(Ui.ACCENT);
+    healthValue.setTextColor(Ui.GREEN);
     trafficValue = text(hero, "");
     trafficValue.setTextColor(Ui.MUTED);
     trafficValue.setTextSize(12);
-    LinearLayout saved = section(page, "Servers", "");
+    LinearLayout tools = new LinearLayout(this);
+    tools.setGravity(Gravity.CENTER_VERTICAL);
+    tools.setPadding(0, dp(8), 0, dp(12));
+    tools.addView(
+        Ui.label(this, "Servers", 20, Ui.INK, true), new LinearLayout.LayoutParams(0, -2, 1));
+    iconButton(tools, R.drawable.ic_import, "Import server profile", this::importProfile);
+    iconButton(tools, R.drawable.ic_plus, "Add server", () -> edit(-1));
+    page.addView(tools);
+    if (profiles.length() == 0) text(page, "Add or import your server.").setTextColor(Ui.MUTED);
     for (int i = 0; i < profiles.length(); i++) {
       final int index = i;
-      JSONObject p = profiles.optJSONObject(i);
+      JSONObject config = profiles.optJSONObject(i);
       LinearLayout row = new LinearLayout(this);
-      row.setOrientation(LinearLayout.VERTICAL);
-      row.setPadding(dp(16), dp(14), dp(16), dp(14));
+      row.setGravity(Gravity.CENTER_VERTICAL);
+      row.setPadding(dp(12), dp(10), dp(8), dp(10));
       row.setBackground(
-          Ui.ripple(this, i == selected ? Ui.SOFT : Ui.SURFACE, 14, i == selected ? 0 : Ui.LINE));
-      TextView name = Ui.label(this, p.optString("name", "Server"), 16, Ui.INK, true);
-      name.setTextColor(i == selected ? Ui.ACCENT : Ui.INK);
-      row.addView(name);
-      text(row, p.optString("domain")).setTextColor(Ui.MUTED);
+          Ui.ripple(this, i == selected ? Ui.SOFT : Ui.SURFACE, 14, i == selected ? Ui.ACCENT : 0));
+      ImageView icon = new ImageView(this);
+      icon.setImageResource(i == selected ? R.drawable.ic_check : R.drawable.ic_server);
+      icon.setImageTintList(
+          android.content.res.ColorStateList.valueOf(i == selected ? Ui.ACCENT : Ui.MUTED));
+      row.addView(icon, new LinearLayout.LayoutParams(dp(24), dp(24)));
+      LinearLayout identity = new LinearLayout(this);
+      identity.setOrientation(LinearLayout.VERTICAL);
+      identity.setPadding(dp(12), 0, dp(4), 0);
+      TextView name = Ui.label(this, config.optString("name", "Server"), 16, Ui.INK, true);
+      name.setMaxLines(1);
+      name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+      identity.addView(name);
+      TextView domain = text(identity, config.optString("domain"));
+      domain.setTextColor(Ui.MUTED);
+      domain.setTextSize(12);
+      domain.setMaxLines(1);
+      domain.setEllipsize(android.text.TextUtils.TruncateAt.END);
+      row.addView(identity, new LinearLayout.LayoutParams(0, -2, 1));
+      ImageButton more =
+          iconButton(row, R.drawable.ic_more, "Options for " + config.optString("name"), () -> {});
+      more.setBackground(Ui.ripple(this, 0x00000000, 12, 0));
+      more.setOnClickListener(v -> serverMenu(more, index));
       row.setOnClickListener(
           v -> {
+            if (connected()) {
+              toast("Disconnect before switching servers");
+              return;
+            }
             selected = index;
             getPreferences(0).edit().putInt("selected", selected).apply();
             servers();
           });
-      row.setContentDescription(p.optString("name") + (i == selected ? ", selected" : ""));
-      row.setFocusable(true);
-      LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
-      rp.setMargins(0, dp(5), 0, dp(5));
-      saved.addView(row, rp);
-    }
-    button(saved, "Add server", () -> edit(-1));
-    button(
-        saved,
-        "Import profile",
-        () ->
-            startActivityForResult(
-                new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                    .setType("application/json")
-                    .addCategory(Intent.CATEGORY_OPENABLE),
-                42));
-    if (profile() != null) {
-      button(saved, "Edit selected server", () -> edit(selected));
-      Button more = button(saved, "Profile options", () -> {});
-      more.setOnClickListener(
+      row.setOnLongClickListener(
           v -> {
-            PopupMenu menu = new PopupMenu(this, more);
-            String[] labels = {
-              "Test resolver latency",
-              "Copy diagnostics",
-              "Export without key",
-              "Duplicate server",
-              "Delete server"
-            };
-            for (int i = 0; i < labels.length; i++) menu.getMenu().add(0, i, i, labels[i]);
-            menu.setOnMenuItemClickListener(
-                item -> {
-                  profileAction(item.getItemId());
-                  return true;
-                });
-            menu.show();
+            serverMenu(more, index);
+            return true;
           });
+      row.setFocusable(true);
+      row.setContentDescription(config.optString("name") + (i == selected ? ", selected" : ""));
+      LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+      rp.bottomMargin = dp(8);
+      page.addView(row, rp);
     }
     updateDashboard();
   }
 
-  private void profileAction(int action) {
-    try {
-      if (action == 0) {
-        latencyTest();
-        return;
-      }
-      if (action == 1) {
-        getSystemService(ClipboardManager.class)
-            .setPrimaryClip(ClipData.newPlainText("MultiDNS diagnostics", TunnelService.stats));
-        Toast.makeText(this, "Diagnostics copied", Toast.LENGTH_SHORT).show();
-        return;
-      }
-      if (action == 2) {
-        JSONObject p = new JSONObject(profile().toString());
-        p.remove("key");
-        exportText = p.toString(2);
-        exportingScan = false;
-        createDocument("multidns-profile.json", "application/json", 43);
-        return;
-      }
-      if (action == 3) {
-        JSONObject p = new JSONObject(profile().toString());
-        p.put("name", p.optString("name") + " copy");
-        profiles.put(p);
-        selected = profiles.length() - 1;
-        save();
-        servers();
-        return;
-      }
-      new AlertDialog.Builder(this)
-          .setTitle("Delete server?")
-          .setMessage(profile().optString("name"))
-          .setPositiveButton(
-              "Delete",
-              (d, w) -> {
-                profiles.remove(selected);
-                selected = profiles.length() > 0 ? 0 : -1;
-                save();
-                servers();
-              })
-          .setNegativeButton("Cancel", null)
-          .show();
-    } catch (Exception e) {
-      error(e.getMessage());
-    }
+  private void serverMenu(View anchor, int index) {
+    PopupMenu menu = new PopupMenu(this, anchor);
+    String[] labels = {"Edit", "Export without key", "Duplicate", "Delete"};
+    for (int i = 0; i < labels.length; i++) menu.getMenu().add(0, i, i, labels[i]);
+    menu.setOnMenuItemClickListener(
+        item -> {
+          try {
+            if (connected() && item.getItemId() != 1) {
+              toast("Disconnect before changing servers");
+              return true;
+            }
+            JSONObject config = new JSONObject(profiles.getJSONObject(index).toString());
+            if (item.getItemId() == 0) edit(index);
+            else if (item.getItemId() == 1) {
+              config.remove("key");
+              exportText = config.toString(2);
+              exportingScan = false;
+              createDocument("multidns-profile.json", "application/json", 43);
+            } else if (item.getItemId() == 2) {
+              config.put("name", config.optString("name") + " copy");
+              profiles.put(config);
+              selected = profiles.length() - 1;
+              save();
+              servers();
+            } else
+              new AlertDialog.Builder(this)
+                  .setTitle("Delete server?")
+                  .setMessage(config.optString("name"))
+                  .setNegativeButton("Cancel", null)
+                  .setPositiveButton(
+                      "Delete",
+                      (d, w) -> {
+                        profiles.remove(index);
+                        if (profiles.length() == 0) selected = -1;
+                        else if (index < selected) selected--;
+                        else if (index == selected)
+                          selected = Math.min(index, profiles.length() - 1);
+                        save();
+                        servers();
+                      })
+                  .show();
+          } catch (Exception e) {
+            error(e.getMessage());
+          }
+          return true;
+        });
+    menu.show();
   }
 
   private void startManagedService(Intent intent) {
@@ -632,6 +721,10 @@ public final class MainActivity extends Activity {
   }
 
   private void edit(int index) {
+    if (connected()) {
+      toast("Disconnect before editing servers");
+      return;
+    }
     clear();
     selectTab(0);
     editing = true;
@@ -685,11 +778,7 @@ public final class MainActivity extends Activity {
           }
         });
     LinearLayout tuning = fold(page, "Transport settings", "");
-    CheckBox adaptive = new CheckBox(this);
-    adaptive.setText("Adapt paths: low RTT for short requests, throughput for bulk");
-    adaptive.setChecked(original.optBoolean("adaptive", true));
-    tuning.addView(adaptive);
-    Ui.styleCheck(adaptive);
+    text(tuning, "Transport adapts automatically to each resolver.").setTextColor(Ui.ACCENT);
     CheckBox xor = new CheckBox(this);
     xor.setText("XOR obfuscation · zero added bytes (updated server required)");
     xor.setChecked(original.optString("obfuscation").equals("xor"));
@@ -790,14 +879,6 @@ public final class MainActivity extends Activity {
     text(tuning, "Scheduling mode");
     Ui.styleSpinner(mode);
     tuning.addView(mode);
-    EditText window =
-        field(tuning, "Base request window (1–32)", "" + original.optInt("window", 8), false);
-    window.setInputType(InputType.TYPE_CLASS_NUMBER);
-    text(
-            tuning,
-            "Adaptive mode expands this window for sustained traffic while limiting each resolver"
-                + " to its learned capacity. Start at 8.")
-        .setTextColor(Ui.MUTED);
     button(
         page,
         "Save server",
@@ -809,8 +890,9 @@ public final class MainActivity extends Activity {
             p.put("client_id", client.getText().toString().trim());
             p.put("key", key.getText().toString());
             p.put("mode", mode.getSelectedItemPosition() == 1 ? "affinity" : "stripe");
-            p.put("window", Integer.parseInt(window.getText().toString()));
-            p.put("adaptive", adaptive.isChecked());
+            p.put("window", 8);
+            p.put("adaptive", true);
+            p.remove("resolver_settings");
             p.put("obfuscation", xor.isChecked() ? "xor" : "none");
             p.put("loaded_rtt_limit_ms", Integer.parseInt(loadedLimit.getText().toString()));
             p.put("latency_target_ms", Integer.parseInt(latencyBudget.getText().toString()));
@@ -939,106 +1021,8 @@ public final class MainActivity extends Activity {
     }
   }
 
-  private void diagnostics() {
-    clear();
-    selectTab(3);
-    heading("Diagnostics", "");
-    LinearLayout summary = section(page, "Live transport", "Counters reset on connection.");
-    diagnosticsSummary = text(summary, "");
-    diagnosticsSummary.setTextIsSelectable(true);
-    button(summary, "Copy diagnostics", () -> copyDebug(TunnelService.stats));
-    LinearLayout tune =
-        section(
-            page,
-            "Parameter discovery",
-            "Measure payload size and concurrency on this network. Disconnect the VPN first.");
-    findTuning = button(tune, "Find optimal parameters", this::startParameterTest);
-    cancelTuning =
-        button(
-            tune,
-            "Cancel parameter test",
-            () -> {
-              mobile.Engine e = tuningEngine;
-              if (e != null) e.cancelParameterTest();
-            });
-    tuningOutput =
-        text(
-            tune,
-            tuningRunning
-                ? "Tests running…"
-                : (tuningReport == null
-                    ? "Requires server 0.3.0 or later."
-                    : formatTuning(tuningReport)));
-    tuningOutput.setTextIsSelectable(true);
-    applyTuning = button(tune, "Apply found parameters to resolvers", this::applyParameters);
-    applyTuning.setVisibility(canApplyTuning() ? View.VISIBLE : View.GONE);
-    tuningDetails = button(tune, "View test details", this::showTuningDetails);
-    copyTuning =
-        button(
-            tune,
-            "Copy parameter test report",
-            () -> {
-              if (tuningReport != null) copyDebug(tuningReport);
-            });
-    updateTuningActions();
-    if (profile() != null) {
-      LinearLayout settings =
-          fold(page, "Resolver settings", "Reconnect after saving changes. 0 = automatic.");
-      button(settings, "Connection and transport settings", () -> edit(selected));
-      JSONObject stored = profile().optJSONObject("resolver_settings");
-      for (String endpoint : profileEndpoints()) {
-        JSONObject cfg = stored == null ? null : stored.optJSONObject(endpoint);
-        button(
-            settings,
-            endpoint
-                + " · "
-                + (cfg == null
-                    ? "Auto"
-                    : ("MTU "
-                        + cfg.optInt("mtu", 1232)
-                        + " · TX/RX "
-                        + cfg.optInt("tx_workers")
-                        + "/"
-                        + cfg.optInt("rx_workers"))),
-            () -> resolverSettings(endpoint));
-      }
-      button(
-          settings,
-          "Reset resolver limits to automatic",
-          () -> {
-            try {
-              JSONObject copy = new JSONObject(profile().toString());
-              copy.remove("resolver_settings");
-              profiles.put(selected, copy);
-              save();
-              diagnostics();
-              toast("Automatic limits saved. Reconnect to activate.");
-            } catch (Exception e) {
-              error(e.getMessage());
-            }
-          });
-    }
-    diagnosticsPaths =
-        section(
-            page,
-            "Resolver statistics",
-            "Queue delay includes local admission; RTT measures DNS exchanges. Retransmissions"
-                + " count ARQ reissues on this path; backups are separate hedges.");
-    updateDiagnostics();
-  }
-
-  private void updateTuningActions() {
-    if (findTuning != null) findTuning.setEnabled(!tuningRunning);
-    if (cancelTuning != null) cancelTuning.setVisibility(tuningRunning ? View.VISIBLE : View.GONE);
-    if (tuningDetails != null)
-      tuningDetails.setVisibility(
-          tuningReport != null && !tuningRunning ? View.VISIBLE : View.GONE);
-    if (copyTuning != null)
-      copyTuning.setVisibility(tuningReport != null && !tuningRunning ? View.VISIBLE : View.GONE);
-  }
-
   private void toast(String message) {
-    Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+    Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
   }
 
   private void copyDebug(String data) {
@@ -1058,472 +1042,239 @@ public final class MainActivity extends Activity {
     JSONArray pool = profile().optJSONArray("resolver_pool");
     for (int i = 0; pool != null && i < pool.length(); i++) out.add(pool.optString(i));
     LinkedHashSet<String> normalized = new LinkedHashSet<>();
-    for (String endpoint : out) {
+    for (String endpoint : out)
       try {
         normalized.add(Mobile.normalizeResolver(endpoint));
       } catch (Exception ignored) {
       }
-    }
     return normalized;
   }
 
-  private void updateDiagnostics() {
-    try {
-      JSONObject stats = new JSONObject(TunnelService.stats);
-      StringBuilder total =
-          new StringBuilder(
-              TunnelService.state
-                  + " · "
-                  + stats.optString("transport_version", BuildConfig.VERSION_NAME)
-                  + "\n");
-      total
-          .append("Loaded RTT budget: ")
-          .append(stats.optInt("loaded_rtt_limit_ms", 500))
-          .append(" ms\n");
-      String[] labels = {
-        "Upload payload/query (bytes)",
-        "Resolver attempts",
-        "Replies",
-        "ARQ retries",
-        "Data backups",
-        "Control backups",
-        "Timeouts",
-        "DNS errors",
-        "Invalid replies",
-        "Socket errors",
-        "Not-ready replies",
-        "Network changes",
-        "Streams",
-        "Queued requests"
-      };
-      String[] keys = {
-        "upload_payload_bytes",
-        "queries",
-        "replies",
-        "retries",
-        "data_hedges",
-        "control_hedges",
-        "timeouts",
-        "dns_errors",
-        "invalid_replies",
-        "socket_errors",
-        "waits",
-        "network_changes",
-        "streams",
-        "admission_queued"
-      };
-      for (int i = 0; stats.has("queries") && i < keys.length; i++)
-        total.append(labels[i]).append(": ").append(stats.optLong(keys[i])).append("\n");
-      if (stats.has("queries"))
-        total.append(
-            String.format(
-                Locale.ROOT,
-                "Oldest queued request: %.1f ms\n",
-                stats.optDouble("oldest_admission_ms", 0)));
-      diagnosticsSummary.setText(total.toString());
-      JSONArray resolvers = stats.optJSONArray("resolvers");
-      for (int i = 0; resolvers != null && i < resolvers.length(); i++) {
-        JSONObject r = resolvers.getJSONObject(i);
-        String endpoint = r.getString("endpoint");
-        TextView view = resolverViews.get(endpoint);
-        if (view == null) {
-          LinearLayout box = fold(diagnosticsPaths, endpoint, "");
-          view = text(box, "");
-          view.setTextIsSelectable(true);
-          resolverViews.put(endpoint, view);
-        }
-        StringBuilder row =
-            new StringBuilder(
-                r.optBoolean("healthy") ? "Reachable" : "Unavailable · redistributing work");
-        row.append(
-            String.format(
-                Locale.ROOT,
-                "\nRTT %.1f ms · min %.1f · variance %.1f\nQueue %.1f ms · peak %.1f",
-                r.optDouble("rtt_ms", 0),
-                r.optDouble("min_rtt_ms", 0),
-                r.optDouble("rtt_variance_ms", 0),
-                r.optDouble("queue_ms", 0),
-                r.optDouble("max_queue_ms", 0)));
-        String[] names = {
-          "Capacity",
-          "Capacity cuts from loss",
-          "Capacity cuts from upload delay",
-          "Capacity cuts from RTT budget",
-          "Paced uploads",
-          "Idle capacity recoveries",
-          "Wire in flight",
-          "Active requests",
-          "Attempts",
-          "Replies",
-          "Retransmissions",
-          "Backups",
-          "Timeouts",
-          "DNS errors",
-          "Invalid replies",
-          "Socket errors",
-          "Connections",
-          "Reconnections",
-          "Recoveries",
-          "TCP fallbacks",
-          "Failed TCP fallbacks",
-          "Download cooldown (ms)",
-          "Uploaded bytes",
-          "Downloaded bytes",
-          "DNS MTU",
-          "TX limit (0=auto)",
-          "RX limit (0=auto)"
-        };
-        String[] fields = {
-          "capacity",
-          "capacity_loss_cuts",
-          "capacity_delay_cuts",
-          "capacity_budget_cuts",
-          "paced_queries",
-          "capacity_recoveries",
-          "wire_in_flight",
-          "in_flight",
-          "queries",
-          "replies",
-          "retransmissions",
-          "hedges",
-          "timeouts",
-          "dns_errors",
-          "invalid_replies",
-          "socket_errors",
-          "connections",
-          "reconnections",
-          "recoveries",
-          "tcp_fallbacks",
-          "tcp_fallback_failures",
-          "read_cooldown_ms",
-          "uploaded",
-          "downloaded",
-          "mtu",
-          "tx_workers",
-          "rx_workers"
-        };
-        for (int j = 0; j < fields.length; j++)
-          row.append("\n").append(names[j]).append(": ").append(r.optLong(fields[j]));
-        row.append(
-            String.format(
-                Locale.ROOT,
-                "\nRecent loss: %.2f%%\nPacing wait: %.2f ms",
-                r.optDouble("recent_loss_percent", 0),
-                r.optDouble("pacing_wait_ms", 0)));
-        row.append("\nLast error: ").append(r.optString("last_error", "none"));
-        view.setText(row.toString());
+  private final class ResolverCard {
+    final LinearLayout box;
+    final TextView ip, latency, detail, status;
+    int lastColor;
+
+    ResolverCard(String endpoint) {
+      box = new LinearLayout(MainActivity.this);
+      box.setOrientation(LinearLayout.VERTICAL);
+      box.setPadding(dp(12), dp(10), dp(12), dp(10));
+      LinearLayout top = new LinearLayout(MainActivity.this);
+      top.setGravity(Gravity.CENTER_VERTICAL);
+      ip = Ui.label(MainActivity.this, endpoint.replaceFirst(":53$", ""), 15, Ui.INK, true);
+      ip.setMaxLines(1);
+      ip.setEllipsize(android.text.TextUtils.TruncateAt.END);
+      top.addView(ip, new LinearLayout.LayoutParams(0, -2, 1));
+      latency = Ui.label(MainActivity.this, "—", 15, Ui.MUTED, true);
+      latency.setPadding(dp(8), 0, 0, 0);
+      top.addView(latency);
+      box.addView(top);
+      LinearLayout bottom = new LinearLayout(MainActivity.this);
+      bottom.setPadding(0, dp(7), 0, 0);
+      bottom.setGravity(Gravity.CENTER_VERTICAL);
+      detail = Ui.label(MainActivity.this, "", 12, Ui.MUTED, false);
+      detail.setMaxLines(2);
+      bottom.addView(detail, new LinearLayout.LayoutParams(0, -2, 1));
+      status = Ui.label(MainActivity.this, "", 11, Ui.MUTED, true);
+      status.setPadding(dp(8), dp(4), dp(8), dp(4));
+      bottom.addView(status);
+      box.addView(bottom);
+      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+      lp.bottomMargin = dp(7);
+      resolverContainer.addView(box, lp);
+    }
+
+    void set(String state, String label, String timing, String sub) {
+      int color = state.equals("green") ? Ui.GREEN : state.equals("red") ? Ui.RED : Ui.YELLOW;
+      if (lastColor != color) {
+        box.setBackground(Ui.shape(MainActivity.this, Ui.SURFACE, 12, color));
+        status.setBackground(Ui.shape(MainActivity.this, Ui.tint(color), 8, 0));
+        status.setTextColor(color);
+        latency.setTextColor(color);
+        lastColor = color;
       }
-    } catch (Exception ignored) {
+      if (!latency.getText().toString().equals(timing)) latency.setText(timing);
+      if (!detail.getText().toString().equals(sub)) detail.setText(sub);
+      if (!status.getText().toString().equals(label)) status.setText(label);
+      box.setContentDescription(ip.getText() + ", " + timing + ", " + sub + ", " + label);
     }
   }
 
-  private void resolverSettings(String endpoint) {
-    if (profile() == null) return;
-    JSONObject all = profile().optJSONObject("resolver_settings"),
-        cfg = all == null ? null : all.optJSONObject(endpoint);
-    if (cfg == null) cfg = new JSONObject();
-    LinearLayout form = new LinearLayout(this);
-    form.setOrientation(LinearLayout.VERTICAL);
-    form.setPadding(dp(20), dp(8), dp(20), dp(12));
-    text(
-        form,
-        "0 uses automatic limits. DNS MTU is the UDP DNS message budget. Upload payload is limited"
-            + " by the tunnel domain. Workers cap in-flight exchanges.");
-    EditText mtu = field(form, "DNS MTU (512–1232; 0 = auto)", "" + cfg.optInt("mtu"), false),
-        tx = field(form, "TX workers (0–64)", "" + cfg.optInt("tx_workers"), false),
-        rx = field(form, "RX workers (0–32)", "" + cfg.optInt("rx_workers"), false),
-        upload =
-            field(form, "Upload payload bytes (0 = auto)", "" + cfg.optInt("upload_mtu"), false);
-    for (EditText input : new EditText[] {mtu, tx, rx, upload})
-      input.setInputType(InputType.TYPE_CLASS_NUMBER);
-    ScrollView scrollForm = new ScrollView(this);
-    scrollForm.addView(form);
-    AlertDialog dialog =
-        new AlertDialog.Builder(this)
-            .setTitle(endpoint)
-            .setView(scrollForm)
-            .setPositiveButton("Save", null)
-            .setNegativeButton("Cancel", null)
-            .create();
-    dialog.setOnShowListener(
-        v ->
-            dialog
-                .getButton(AlertDialog.BUTTON_POSITIVE)
-                .setOnClickListener(
-                    w -> {
-                      try {
-                        JSONObject copy = new JSONObject(profile().toString()),
-                            limits = copy.optJSONObject("resolver_settings");
-                        if (limits == null) limits = new JSONObject();
-                        JSONObject values =
-                            new JSONObject()
-                                .put("mtu", Integer.parseInt(mtu.getText().toString()))
-                                .put("tx_workers", Integer.parseInt(tx.getText().toString()))
-                                .put("rx_workers", Integer.parseInt(rx.getText().toString()))
-                                .put("upload_mtu", Integer.parseInt(upload.getText().toString()));
-                        limits.put(endpoint, values);
-                        copy.put("resolver_settings", limits);
-                        Mobile.validate(copy.toString());
-                        profiles.put(selected, copy);
-                        save();
-                        dialog.dismiss();
-                        diagnostics();
-                        toast("Saved. Reconnect to activate.");
-                      } catch (Exception e) {
-                        error(e.getMessage());
-                      }
-                    }));
-    dialog.show();
-  }
-
-  private boolean canApplyTuning() {
-    try {
-      return !tuningRunning
-          && tuningReport != null
-          && tuningProfile != null
-          && profile() != null
-          && profile().toString().equals(tuningProfile)
-          && !new JSONObject(tuningReport).optBoolean("cancelled")
-          && new JSONObject(tuningReport).getJSONObject("resolver_settings").length() > 0;
-    } catch (Exception e) {
-      return false;
+  private void diagnostics() {
+    clear();
+    selectTab(3);
+    heading("Resolvers", "");
+    resolverLive = connected();
+    if (!resolverLive) {
+      LinearLayout actions = new LinearLayout(this);
+      actions.setGravity(Gravity.CENTER_VERTICAL);
+      TextView label = Ui.label(this, "ICMP + end-to-end", 14, Ui.MUTED, false);
+      actions.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+      latencyButton =
+          button(actions, latencyRunning ? "Testing…" : "Test latency", this::latencyTest);
+      // Buttons in a horizontal toolbar must wrap instead of taking the full width.
+      latencyButton.setLayoutParams(new LinearLayout.LayoutParams(-2, -2));
+      latencyButton.setEnabled(!latencyRunning && profile() != null);
+      cancelLatency =
+          button(
+              actions,
+              "Cancel",
+              () -> {
+                stopLatencyTest();
+                diagnostics();
+              });
+      cancelLatency.setLayoutParams(new LinearLayout.LayoutParams(-2, -2));
+      cancelLatency.setVisibility(latencyRunning ? View.VISIBLE : View.GONE);
+      page.addView(actions);
+    } else {
+      TextView live = text(page, "LIVE  ·  Automatic transport");
+      live.setTextColor(Ui.GREEN);
+      live.setPadding(0, 0, 0, dp(12));
     }
-  }
-
-  private String formatTuning(String report) {
-    try {
-      JSONObject json = new JSONObject(report);
-      StringBuilder out =
-          new StringBuilder(
-              json.optBoolean("cancelled")
-                  ? "Cancelled. No settings applied.\n"
-                  : "Completed. Review recommendations before applying.\n");
-      JSONArray results = json.getJSONArray("resolvers");
-      for (int i = 0; i < results.length(); i++) {
-        JSONObject r = results.getJSONObject(i), cfg = r.getJSONObject("settings");
-        out.append(r.getString("endpoint")).append("\n");
-        if (r.has("error")) out.append(r.getString("error"));
-        else
-          out.append("DNS MTU ")
-              .append(cfg.optInt("mtu"))
-              .append(" · upload ")
-              .append(cfg.optInt("upload_mtu"))
-              .append(" B · TX ")
-              .append(cfg.optInt("tx_workers"))
-              .append(" / RX ")
-              .append(cfg.optInt("rx_workers"))
-              .append(" · ")
-              .append(r.getJSONArray("trials").length())
-              .append(" trials");
-        out.append("\n");
+    resolverContainer = new LinearLayout(this);
+    resolverContainer.setOrientation(LinearLayout.VERTICAL);
+    page.addView(resolverContainer);
+    if (!resolverLive)
+      for (String endpoint : profileEndpoints()) {
+        JSONObject result = latencyRows.get(endpoint);
+        if (result == null && !latencyRunning)
+          try {
+            result = new JSONObject(getSharedPreferences("latency", 0).getString(endpoint, "{}"));
+          } catch (Exception ignored) {
+          }
+        renderLatency(endpoint, result);
       }
-      return out.toString();
-    } catch (Exception e) {
-      return "Unable to read test report";
-    }
+    LinearLayout debug = card(page);
+    LinearLayout toggleRow = new LinearLayout(this);
+    toggleRow.setGravity(Gravity.CENTER_VERTICAL);
+    toggleRow.addView(
+        Ui.label(this, "Debug capture", 15, Ui.INK, true), new LinearLayout.LayoutParams(0, -2, 1));
+    Switch toggle = new Switch(this);
+    toggle.setContentDescription("Capture detailed diagnostics");
+    toggle.setChecked(getSharedPreferences("ui", 0).getBoolean("debug", false));
+    toggleRow.addView(toggle);
+    debug.addView(toggleRow);
+    text(debug, "Detailed transport data. Off by default.").setTextColor(Ui.MUTED);
+    debugCopy = button(debug, "Copy debug report", () -> copyDebug(TunnelService.debugStats));
+    debugCopy.setEnabled(toggle.isChecked() && !TunnelService.debugStats.equals("{}"));
+    toggle.setOnCheckedChangeListener(
+        (v, on) -> {
+          TunnelService.diagnostics(this, on);
+          debugCopy.setEnabled(on && !TunnelService.debugStats.equals("{}"));
+        });
+    updateResolverCards();
   }
 
-  private void showTuningDetails() {
-    if (tuningReport == null) {
-      toast("Run parameter discovery first.");
-      return;
-    }
-    try {
-      JSONObject report = new JSONObject(tuningReport);
-      StringBuilder out = new StringBuilder(formatTuning(tuningReport));
-      JSONArray results = report.getJSONArray("resolvers");
-      for (int i = 0; i < results.length(); i++) {
-        JSONObject resolver = results.getJSONObject(i);
-        out.append("\n").append(resolver.getString("endpoint")).append("\n");
-        JSONArray trials = resolver.getJSONArray("trials");
-        for (int j = 0; j < trials.length(); j++) {
-          JSONObject trial = trials.getJSONObject(j);
-          out.append(
-              String.format(
-                  Locale.ROOT,
-                  "%s · MTU %d · TX payload %d B · %d workers\n"
-                      + "%d/%d replies · p95 %.1f ms · %.1f KiB/s\n\n",
-                  trial.optString("direction").toUpperCase(Locale.ROOT)
-                      + (trial.optBoolean("repeated") ? " (repeat)" : ""),
-                  trial.optInt("mtu"),
-                  trial.optInt("upload_mtu"),
-                  trial.optInt("workers"),
-                  trial.optInt("received"),
-                  trial.optInt("sent"),
-                  trial.optDouble("p95_ms", 0),
-                  trial.optDouble("bytes_per_second", 0) / 1024));
-        }
-      }
-      ScrollView scroller = new ScrollView(this);
-      TextView detail = Ui.label(this, out.toString(), 14, Ui.INK, false);
-      detail.setPadding(dp(20), dp(16), dp(20), dp(16));
-      detail.setTextIsSelectable(true);
-      scroller.addView(detail);
-      new AlertDialog.Builder(this)
-          .setTitle("Parameter test evidence")
-          .setView(scroller)
-          .setPositiveButton("Done", null)
-          .show();
-    } catch (Exception e) {
-      error(e.getMessage());
-    }
-  }
-
-  private void startParameterTest() {
-    if (profile() == null) {
-      error("Add a server first.");
-      return;
-    }
-    if (tuningRunning) {
-      toast("Tests are already running");
-      return;
-    }
-    if (TunnelService.instance != null) {
-      error(
-          "Disconnect the VPN before parameter discovery so tests measure resolvers"
-              + " independently.");
-      return;
-    }
-    if (ScannerService.state.equals("Scanning")) {
-      error("Stop the resolver scan before parameter discovery.");
-      return;
-    }
-    tuningRunning = true;
-    tuningReport = null;
-    tuningProfile = profile().toString();
-    updateTuningActions();
-    tuningEngine = Mobile.newEngine();
-    final String config = tuningProfile;
-    final mobile.Engine engine = tuningEngine;
-    if (applyTuning != null) applyTuning.setVisibility(View.GONE);
-    new Thread(
-            () -> {
-              try {
-                String report =
-                    engine.findOptimalParameters(
-                        config,
-                        null,
-                        message -> {
-                          try {
-                            JSONObject event = new JSONObject(message);
-                            String line =
-                                event.optString("Endpoint") + " · " + event.optString("Stage");
-                            handler.post(
-                                () -> {
-                                  if (tuningOutput != null) tuningOutput.setText(line);
-                                });
-                          } catch (Exception ignored) {
-                          }
-                        });
-                handler.post(
-                    () -> {
-                      tuningReport = report;
-                      if (tuningOutput != null) tuningOutput.setText(formatTuning(report));
-                      updateTuningActions();
-                      if (applyTuning != null)
-                        applyTuning.setVisibility(canApplyTuning() ? View.VISIBLE : View.GONE);
-                    });
-              } catch (Exception e) {
-                handler.post(() -> error(e.getMessage()));
-              } finally {
-                tuningRunning = false;
-                tuningEngine = null;
-                handler.post(
-                    () -> {
-                      updateTuningActions();
-                      if (applyTuning != null)
-                        applyTuning.setVisibility(canApplyTuning() ? View.VISIBLE : View.GONE);
-                    });
-              }
-            },
-            "multidns-parameters")
-        .start();
-  }
-
-  private void applyParameters() {
-    if (!canApplyTuning()) {
-      error("Run parameter discovery for the selected profile first.");
-      return;
-    }
-    try {
-      JSONObject report = new JSONObject(tuningReport),
-          copy = new JSONObject(profile().toString()),
-          settings = copy.optJSONObject("resolver_settings");
-      if (settings == null) settings = new JSONObject();
-      JSONObject found = report.getJSONObject("resolver_settings");
-      Iterator<String> keys = found.keys();
-      while (keys.hasNext()) {
-        String endpoint = keys.next();
-        settings.put(endpoint, found.getJSONObject(endpoint));
-      }
-      copy.put("resolver_settings", settings);
-      copy.put("adaptive", true);
-      Mobile.validate(copy.toString());
-      profiles.put(selected, copy);
-      save();
-      tuningProfile = null;
+  private void updateResolverCards() {
+    if (resolverContainer == null) return;
+    if (resolverLive == null || resolverLive != connected()) {
       diagnostics();
-      toast("Parameters saved for all working resolvers. Reconnect to activate.");
-    } catch (Exception e) {
-      error(e.getMessage());
+      return;
     }
+    if (debugCopy != null)
+      debugCopy.setEnabled(
+          getSharedPreferences("ui", 0).getBoolean("debug", false)
+              && !TunnelService.debugStats.equals("{}"));
+    if (!resolverLive) return;
+    try {
+      JSONArray rows = new JSONObject(TunnelService.stats).optJSONArray("resolvers");
+      for (int i = 0; rows != null && i < rows.length(); i++) {
+        JSONObject row = rows.getJSONObject(i);
+        String endpoint = row.getString("endpoint");
+        ResolverCard card = resolverCards.get(endpoint);
+        if (card == null) {
+          card = new ResolverCard(endpoint);
+          resolverCards.put(endpoint, card);
+        }
+        double rtt = row.optDouble("rtt_ms", 0);
+        card.set(
+            row.optString("state", "yellow"),
+            row.optString("status", "Checking"),
+            rtt > 0 ? String.format(Locale.ROOT, "%.0f ms", rtt) : "—",
+            row.optInt("streams") + " streams");
+      }
+    } catch (JSONException ignored) {
+    }
+  }
+
+  private void renderLatency(String endpoint, JSONObject row) {
+    if (resolverContainer == null || Boolean.TRUE.equals(resolverLive)) return;
+    ResolverCard card = resolverCards.get(endpoint);
+    if (card == null) {
+      card = new ResolverCard(endpoint);
+      resolverCards.put(endpoint, card);
+    }
+    boolean tested = row != null && row.has("healthy"), ok = tested && row.optBoolean("healthy");
+    double e2e = row == null ? 0 : row.optDouble("rtt_ms", 0),
+        icmp = row == null ? -1 : row.optDouble("icmp_ms", -1);
+    String sub =
+        "ICMP "
+            + (icmp >= 0
+                ? String.format(Locale.ROOT, "%.0f ms", icmp)
+                : row == null ? "—" : row.optString("icmp_status", "—"))
+            + "  ·  E2E "
+            + (ok ? String.format(Locale.ROOT, "%.0f ms", e2e) : tested ? "No reply" : "—");
+    card.set(
+        !tested ? "yellow" : ok ? "green" : "red",
+        !tested ? (latencyRunning ? "Testing…" : "Not tested") : ok ? "Reachable" : "Unavailable",
+        ok ? String.format(Locale.ROOT, "%.0f ms", e2e) : "—",
+        sub);
+  }
+
+  private void stopLatencyTest() {
+    if (latencyTester != null) {
+      latencyTester.stop();
+      latencyTester = null;
+    }
+    latencyRunning = false;
   }
 
   private void latencyTest() {
-    if (TunnelService.instance != null) {
-      error("Disconnect the VPN before running the manual latency test.");
+    if (ScannerService.running) {
+      toast("Pause scanning before testing latency");
       return;
     }
-    if (latencyRunning) {
-      error("Latency test is already running.");
-      return;
-    }
-    if (profile() == null) return;
-    clear();
-    selectTab(0);
-    editing = true;
-    heading("Resolver latency", "Test every candidate through your tunnel server.");
-    button(page, "Back to connection", this::servers);
-    text(page, "Concurrent authenticated tunnel probes · VPN remains off");
-    latencyResults = text(page, "Testing all candidates…\n");
-    final TextView output = latencyResults;
-    final String config = profile().toString();
+    if (connected() || profile() == null || latencyRunning) return;
+    latencyRows.clear();
     latencyRunning = true;
-    new Thread(
-            () -> {
-              try {
-                mobile.Engine engine = Mobile.newEngine();
-                engine.testLatency(
-                    config,
-                    message -> {
-                      try {
-                        JSONObject r = new JSONObject(message);
-                        getSharedPreferences("latency", 0)
-                            .edit()
-                            .putString(r.getString("endpoint"), message)
-                            .apply();
-                        String line =
-                            r.getString("endpoint")
-                                + "  "
-                                + (r.optBoolean("healthy")
-                                    ? String.format(
-                                        java.util.Locale.ROOT, "%.1f ms", r.optDouble("rtt_ms", 0))
-                                    : "not working")
-                                + "\n";
-                        runOnUiThread(() -> output.append(line));
-                      } catch (Exception ignored) {
-                      }
-                    });
-                runOnUiThread(
-                    () -> output.append("Finished. Automatic mode measures again on startup.\n"));
-              } catch (Exception e) {
-                runOnUiThread(() -> error(e.getMessage()));
-              } finally {
-                latencyRunning = false;
-              }
-            },
-            "multidns-latency")
-        .start();
+    LatencyTester tester = new LatencyTester();
+    latencyTester = tester;
+    final String config = profile().toString();
+    diagnostics();
+    tester.run(
+        config,
+        new LatencyTester.Events() {
+          public void row(String endpoint, JSONObject result) {
+            handler.post(
+                () -> {
+                  if (latencyTester != tester) return;
+                  latencyRows.put(endpoint, result);
+                  getSharedPreferences("latency", 0)
+                      .edit()
+                      .putString(endpoint, result.toString())
+                      .apply();
+                  if (currentTab == 3) renderLatency(endpoint, result);
+                });
+          }
+
+          public void failed(String message) {
+            handler.post(() -> toast(message == null ? "Latency test failed" : message));
+          }
+
+          public void finished() {
+            handler.post(
+                () -> {
+                  if (latencyTester != tester) return;
+                  latencyRunning = false;
+                  latencyTester = null;
+                  if (latencyButton != null) {
+                    latencyButton.setText("Test again");
+                    latencyButton.setEnabled(true);
+                  }
+                  if (cancelLatency != null) cancelLatency.setVisibility(View.GONE);
+                });
+          }
+        });
   }
 
   private void routing() {
@@ -1671,13 +1422,8 @@ public final class MainActivity extends Activity {
           .setTextColor(Ui.MUTED);
       row.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
       info.setOnClickListener(v -> editRule(list, rules, index));
-      Button more = new Button(this);
-      more.setText("Options");
-      more.setContentDescription("Options for rule " + (i + 1));
-      Ui.styleButton(more, false);
-      more.setTextSize(12);
-      more.setPadding(dp(8), 0, dp(8), 0);
-      row.addView(more, new LinearLayout.LayoutParams(dp(72), dp(48)));
+      ImageButton more =
+          iconButton(row, R.drawable.ic_more, "Options for rule " + (i + 1), () -> {});
       more.setOnClickListener(
           v -> {
             PopupMenu menu = new PopupMenu(this, more);
@@ -1782,6 +1528,51 @@ public final class MainActivity extends Activity {
     dialog.show();
   }
 
+  private void updateScanControl() {
+    boolean running = ScannerService.running;
+    scanControl.setText(running ? "Pause scan" : "Start scan");
+    Ui.styleButton(scanControl, !running);
+    Ui.icon(
+        scanControl,
+        running ? R.drawable.ic_stop : R.drawable.ic_scan,
+        running ? Ui.YELLOW : Ui.ON_ACCENT);
+    resumeScan.setEnabled(
+        !running
+            && !ScannerService.state.equals("Completed")
+            && getSharedPreferences("scan-progress", 0).getLong("next", 0) > 0);
+    resumeScan.setAlpha(resumeScan.isEnabled() ? 1f : .35f);
+    if (scanStatus != null)
+      scanStatus.setTextColor(
+          running ? Ui.ACCENT : ScannerService.state.equals("Completed") ? Ui.GREEN : Ui.MUTED);
+  }
+
+  private void startScan(boolean resume) {
+    stopLatencyTest();
+    try {
+      if (ScannerService.running) return;
+      getSharedPreferences("scanner", 0)
+          .edit()
+          .putString("ranges", ranges.getText().toString())
+          .putString("workers", workers.getText().toString())
+          .putString("timeout", timeout.getText().toString())
+          .putString("zone", zone.getText().toString())
+          .apply();
+      JSONObject options =
+          new JSONObject()
+              .put("ranges", ranges.getText().toString())
+              .put("workers", Integer.parseInt(workers.getText().toString()))
+              .put("timeout_ms", Integer.parseInt(timeout.getText().toString()))
+              .put("ns_zone", zone.getText().toString().trim())
+              .put("profile", profile());
+      startManagedService(
+          new Intent(this, ScannerService.class)
+              .putExtra("options", options.toString())
+              .putExtra("resume", resume));
+    } catch (Exception e) {
+      error(e.getMessage());
+    }
+  }
+
   private void scanner() {
     clear();
     selectTab(1);
@@ -1811,74 +1602,39 @@ public final class MainActivity extends Activity {
     zone = field(scanAdvanced, "NS probe zone (optional)", prefs.getString("zone", ""), false);
     workers.setInputType(InputType.TYPE_CLASS_NUMBER);
     timeout.setInputType(InputType.TYPE_CLASS_NUMBER);
-    LinearLayout results =
-        section(page, "Live results", "Only authenticated tunnel matches are included.");
+    LinearLayout results = section(page, "Results", "");
+    scanStatus = text(results, ScannerService.state);
+    LinearLayout filters = fold(results, "Filters", "");
     txtFilter = new CheckBox(this);
     txtFilter.setText("Only TXT verified");
     txtFilter.setChecked(true);
-    results.addView(txtFilter);
+    filters.addView(txtFilter);
     Ui.styleCheck(txtFilter);
     nsFilter = new CheckBox(this);
     nsFilter.setText("Also require NS → A");
-    results.addView(nsFilter);
+    filters.addView(nsFilter);
     Ui.styleCheck(nsFilter);
-    scanStatus = text(results, ScannerService.state);
     scanResults = text(results, "");
     scanResults.setTextIsSelectable(true);
     scanResults.setTypeface(android.graphics.Typeface.MONOSPACE);
     scanResults.setTextSize(12);
     page.removeView(results);
-    button(
-        page,
-        "Start scan",
-        () -> {
-          try {
-            if (ScannerService.running) throw new Exception("Stop the current scan first");
-            prefs
-                .edit()
-                .putString("ranges", ranges.getText().toString())
-                .putString("workers", workers.getText().toString())
-                .putString("timeout", timeout.getText().toString())
-                .putString("zone", zone.getText().toString())
-                .apply();
-            JSONObject o =
-                new JSONObject()
-                    .put("ranges", ranges.getText().toString())
-                    .put("workers", Integer.parseInt(workers.getText().toString()))
-                    .put("timeout_ms", Integer.parseInt(timeout.getText().toString()))
-                    .put("ns_zone", zone.getText().toString().trim())
-                    .put("profile", profile());
-            startManagedService(
-                new Intent(this, ScannerService.class).putExtra("options", o.toString()));
-          } catch (Exception e) {
-            error(e.getMessage());
-          }
-        });
-    button(
-        page,
-        "Resume paused scan",
-        () -> {
-          try {
-            if (ScannerService.running) throw new Exception("Pause the current scan first");
-            JSONObject o =
-                new JSONObject()
-                    .put("ranges", ranges.getText().toString())
-                    .put("workers", Integer.parseInt(workers.getText().toString()))
-                    .put("timeout_ms", Integer.parseInt(timeout.getText().toString()))
-                    .put("ns_zone", zone.getText().toString().trim())
-                    .put("profile", profile());
-            startManagedService(
-                new Intent(this, ScannerService.class)
-                    .putExtra("options", o.toString())
-                    .putExtra("resume", true));
-          } catch (Exception e) {
-            error(e.getMessage());
-          }
-        });
-    button(
-        page,
-        "Pause / stop scan",
-        () -> startService(new Intent(this, ScannerService.class).setAction("STOP")));
+    LinearLayout actions = new LinearLayout(this);
+    actions.setGravity(Gravity.CENTER_VERTICAL);
+    scanControl =
+        button(
+            actions,
+            "Start scan",
+            () -> {
+              if (ScannerService.running)
+                startService(new Intent(this, ScannerService.class).setAction("STOP"));
+              else startScan(false);
+            });
+    scanControl.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+    resumeScan =
+        iconButton(actions, R.drawable.ic_resume, "Resume paused scan", () -> startScan(true));
+    page.addView(actions);
+    updateScanControl();
     page.addView(results);
     LinearLayout exports =
         fold(page, "Use these results", "Copy, export, or add matching resolvers to your server.");
@@ -1962,6 +1718,10 @@ public final class MainActivity extends Activity {
       if (request == 41) {
         connect();
       } else if (request == 42 && data != null) {
+        if (connected()) {
+          toast("Disconnect before importing a server");
+          return;
+        }
         try (InputStream in = getContentResolver().openInputStream(data.getData())) {
           ByteArrayOutputStream b = new ByteArrayOutputStream();
           byte[] chunk = new byte[8192];
@@ -1971,6 +1731,9 @@ public final class MainActivity extends Activity {
             b.write(chunk, 0, n);
           }
           JSONObject p = new JSONObject(b.toString(StandardCharsets.UTF_8.name()));
+          p.remove("resolver_settings");
+          p.put("adaptive", true);
+          p.put("window", 8);
           if (!p.has("key")) {
             p.put("key", "");
             profiles.put(p);
@@ -2020,8 +1783,23 @@ public final class MainActivity extends Activity {
   }
 
   @Override
+  protected void onResume() {
+    super.onResume();
+    TunnelService.refreshVisible();
+    handler.removeCallbacks(refresh);
+    handler.post(refresh);
+  }
+
+  @Override
+  protected void onPause() {
+    TunnelService.uiVisible = false;
+    handler.removeCallbacks(refresh);
+    super.onPause();
+  }
+
+  @Override
   protected void onDestroy() {
-    if (tuningEngine != null) tuningEngine.cancelParameterTest();
+    stopLatencyTest();
     handler.removeCallbacks(refresh);
     super.onDestroy();
   }

@@ -1,20 +1,20 @@
 <resources>
  <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
   <item name="android:fontFamily">sans</item>
-  <item name="android:colorAccent">#78dac0</item>
+  <item name="android:colorAccent">#72bcff</item>
   <item name="android:windowLightStatusBar">false</item>
   <item name="android:windowActionModeOverlay">true</item>
-  <item name="android:windowBackground">#101617</item>
-  <item name="android:colorBackground">#101617</item>
-  <item name="android:colorBackgroundFloating">#192224</item>
-  <item name="android:textColorPrimary">#e7efed</item>
-  <item name="android:textColorSecondary">#a5b7b1</item>
-  <item name="android:textColorHint">#a5b7b1</item>
-  <item name="android:colorControlNormal">#a5b7b1</item>
-  <item name="android:colorControlActivated">#78dac0</item>
-  <item name="android:colorControlHighlight">#2878dac0</item>
-  <item name="android:colorButtonNormal">#192224</item>
-  <item name="android:navigationBarColor">#192224</item>
-  <item name="android:statusBarColor">#101617</item>
+  <item name="android:windowBackground">#0b1020</item>
+  <item name="android:colorBackground">#0b1020</item>
+  <item name="android:colorBackgroundFloating">#131c2e</item>
+  <item name="android:textColorPrimary">#edf2ff</item>
+  <item name="android:textColorSecondary">#93a3bd</item>
+  <item name="android:textColorHint">#93a3bd</item>
+  <item name="android:colorControlNormal">#93a3bd</item>
+  <item name="android:colorControlActivated">#72bcff</item>
+  <item name="android:colorControlHighlight">#2872bcff</item>
+  <item name="android:colorButtonNormal">#131c2e</item>
+  <item name="android:navigationBarColor">#131c2e</item>
+  <item name="android:statusBarColor">#0b1020</item>
  </style>
 </resources>

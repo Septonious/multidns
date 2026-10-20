@@ -1,5 +1,66 @@
 # Performance and tuning
 
+## Version 0.3.4: stable health, bounded larger pools and lightweight UI
+
+The user's changed 20/21-candidate pool measured 10.2 Mbps down / 1.53 Mbps up,
+83 ms idle and 131/191 ms loaded ping on 0.3.3. Several resolver statuses flickered
+while the VPN stayed connected. Because the pool changed, this is not evidence
+that 0.3.3 improved real phone performance. Its JSON was truncated.
+
+0.3.4 separates isolated loss from confirmed outages, routes waiting work away
+briefly after an error, reserves global credits before resolver ownership, and
+wakes one chosen fair-queue waiter per credit. Global data credits scale up to
+512, with RX capped at 160 and each resolver still learning at most 64 total /
+32 RX credits. A tested 1024-credit candidate regressed badly (including 7 s
+application echoes); it is retained as intermediate evidence and not shipped.
+The on-wire format, upload payload size and authentication bytes are unchanged.
+
+Busy paths use authenticated data for health; idle/spare/failed paths still get
+recovery probes. Probes reuse protected tracked sockets and cancel promptly.
+Speculative future reads have a 350 ms lifetime; idle heads remain available.
+The read RTO has a 350 ms floor, bounded by the profile timeout. Write pacing,
+ACK-only delay feedback and the configurable 500 ms loaded RTT budget remain.
+
+Android ignores legacy per-resolver overrides and uses automatic control. Its
+normal snapshots contain only rates and slim resolver cards. Detailed reports
+and optional timing are enabled by a debug switch. The activity stops polling
+when hidden; the service reuses a worker and reduces hidden snapshots to 5 s.
+
+### Controlled local comparison
+
+Four upload-only TCP sinks receive 512 KiB each and return SHA-256. Application
+echo traffic and 26 idle destination connections share either 8 or 20 independent
+local DNS fixtures with fixed 35..90 ms delays. No loss is deliberately injected
+in this capacity comparison. Old source is checkpoint 612c04b / 0.3.3; identical
+benchmark fixture source is retained. Runs are sequential on the two-CPU host.
+
+| Paths | Version | Upload time (s) | Upload (Mbps) | Echo p99 (ms) | Slowest echo (ms) | Retries |
+|---|---|---:|---:|---:|---:|---:|
+| 8 | 0.3.3 | 16.36 | 1.026 | 208.4 | 231.6 | 4 |
+| 20 | 0.3.3 | 15.17 | 1.106 | 140.0 | 325.4 | 1 |
+| 8 | 0.3.4 | 4.61 | 3.643 | 130.1 | 132.5 | 0 |
+| 8 | 0.3.4 | 4.65 | 3.605 | 128.0 | 138.5 | 0 |
+| 20 | 0.3.4 | 4.59 | 3.655 | 126.5 | 144.1 | 0 |
+| 20 | 0.3.4 | 4.06 | 4.130 | 125.5 | 145.1 | 0 |
+
+A separate 8-path recovery fixture uploads 128 KiB per sink and deliberately
+loses every 71st data request per resolver. Its queued case adds 8 ms per request
+above 8 concurrent requests per resolver. Both final digests match:
+
+| Queued | Upload time (s) | Upload (Mbps) | Echo p99 (ms) | Slowest echo (ms) | Retries |
+|---|---:|---:|---:|---:|---:|
+| No | 3.02 | 1.391 | 129.7 | 261.3 | 65 |
+| Yes | 6.01 | 0.698 | 227.5 | 228.4 | 85 |
+
+Across these final six cases, 229 byte-verified application echoes peaked at
+261.3 ms. This does not establish a worst-case 500 ms Internet/phone bound.
+Intermediate candidates had much larger outliers and their logs are retained.
+A final full race suite and vet pass; a mixed-traffic intermediate run timed out,
+then its targeted recheck and final complete source suite passed. No physical
+Oppo measurement, native VPN lifecycle run or real ICMP behavior was available
+here. Native Robolectric rendering tests cover 360 dp and 320 dp / 130% font,
+live/disconnected resolver views, debug switch/copy, and unclipped navigation.
+
 ## Version 0.3.3: upload ACK clock, pacing and loss tolerance
 
 The user's 0.3.2 phone measurement improved to 4.78 Mbps down / 0.60 Mbps up,

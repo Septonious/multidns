@@ -19,6 +19,12 @@ import (
 
 type Protector interface{ Protect(fd int) bool }
 type Stats struct {
+	SessionSeconds float64 `json:"session_seconds"`
+	DataBudget     int     `json:"data_budget"`
+	DataInFlight   int     `json:"data_in_flight"`
+	ReadInFlight   int     `json:"read_in_flight"`
+	ActiveUploads  int64   `json:"active_uploads"`
+
 	UploadPayloadBytes int    `json:"upload_payload_bytes"`
 	LoadedRTTLimitMS   int    `json:"loaded_rtt_limit_ms"`
 	Exchanges          uint64 `json:"exchanges"`
@@ -42,6 +48,10 @@ type Stats struct {
 	Streams    int64  `json:"streams"`
 }
 type Client struct {
+	diagnostics             atomic.Bool
+	started                 time.Time
+	leasedData, leasedReads int
+
 	dataHedges, controlHedges atomic.Uint64
 	flowFlight                map[flowKey]int
 	activeReaders             map[uint32]time.Time
@@ -63,7 +73,7 @@ type Client struct {
 	deficits         []float64
 	pathDeficits     map[string]float64
 	dispatchDeficits map[string]float64
-	admissionWake    chan struct{}
+	waitingWrites    int
 	admissions       []*admission
 	socketOpened     map[string]bool
 
@@ -102,14 +112,17 @@ func NewClientContext(parent context.Context, p Profile, protector Protector) (*
 	ctx, cancel := context.WithCancel(parent)
 	globalBudget, readBudget, dataBudget := 128, 96, 120
 	if p.Adaptive {
-		globalBudget, readBudget, dataBudget = 256, 160, 240
+		// Only independent path credits grow: idle polls retain their global cap.
+		// A large pool must not inherit the same TX ceiling as four groups.
+		dataBudget = min(512, max(240, 64*len(p.ResolverPool())))
+		globalBudget, readBudget = dataBudget+16, 160
 	}
-	c := &Client{Profile: p, dialer: &net.Dialer{Timeout: 10 * time.Second}, ctx: ctx, cancel: cancel, slots: make(chan struct{}, globalBudget), names: map[string]nameEntry{}, sockets: map[string]*resolverSocket{}}
+	c := &Client{started: time.Now(), Profile: p, dialer: &net.Dialer{Timeout: 10 * time.Second}, ctx: ctx, cancel: cancel, slots: make(chan struct{}, globalBudget), names: map[string]nameEntry{}, sockets: map[string]*resolverSocket{}}
 	// Idle download polls must leave capacity for uploads and control requests.
 	c.readSlots = make(chan struct{}, readBudget)
 	c.dataSlots = make(chan struct{}, dataBudget)
-	c.admissionWake = make(chan struct{})
 	c.socketOpened = map[string]bool{}
+	c.diagnostics.Store(true)
 	c.uploadSize = uploadCapacity(p)
 	for _, settings := range p.ResolverSettings {
 		if settings.UploadMTU > 0 {
@@ -166,7 +179,7 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{UploadPayloadBytes: c.uploadSize, LoadedRTTLimitMS: c.Profile.LoadedRTTLimitMS, TransportVersion: "0.3.3", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
+	return Stats{SessionSeconds: time.Since(c.started).Seconds(), DataBudget: cap(c.dataSlots), DataInFlight: len(c.dataSlots), ReadInFlight: len(c.readSlots), ActiveUploads: c.activeUploads.Load(), UploadPayloadBytes: c.uploadSize, LoadedRTTLimitMS: c.Profile.LoadedRTTLimitMS, TransportVersion: "0.3.4", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
@@ -264,6 +277,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				results <- result{e: err}
 				return
 			}
+			admittedAt := time.Now()
 			wireDone := finishedDNS
 			releases := []func(){release}
 			defer func() {
@@ -323,6 +337,17 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			c.recordStart(addr)
 			c.adaptiveMu.Lock()
 			if h := c.health[addr]; h != nil {
+				waitMS := 0.0
+				if c.diagnostics.Load() {
+					waitMS = float64(time.Since(admittedAt).Microseconds()) / 1000
+				}
+				h.SlotWaitMS = .875*h.SlotWaitMS + .125*waitMS
+				h.MaxSlotWaitMS = max(h.MaxSlotWaitMS, waitMS)
+				if f.Op == opWrite {
+					h.TXQueries++
+				} else if f.Op == opRead {
+					h.RXQueries++
+				}
 				if f.Retry {
 					h.Retransmissions++
 				}
@@ -367,9 +392,6 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 					err = fmt.Errorf("%w: mismatched response", errInvalidReply)
 				}
 			}
-			if fallback && f.Op == opRead {
-				c.recordTCPFallback(addr, err, raceCtx.Err() != nil)
-			}
 			size := 0
 			if err == nil && answer.Data[0] == statusOK {
 				if f.Op == opRead {
@@ -377,6 +399,10 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				} else if f.Op == opWrite {
 					size = len(f.Data)
 				}
+			}
+			// A tiny WAIT is not evidence that this path can carry large replies.
+			if fallback && f.Op == opRead && (err != nil || size > 0) {
+				c.recordTCPFallback(addr, err, raceCtx.Err() != nil)
 			}
 			if err != nil && raceCtx.Err() == nil {
 				c.recordFailure(err)
@@ -644,8 +670,19 @@ func (s *Conn) prefetch() {
 			// Only the head of an idle stream keeps polling. Speculative future
 			// chunks wait for progress before trying again, avoiding N*window
 			// background polls on HTTP keepalive and upload-only connections.
-			b, err := s.client.rpcACK(ctx, frame{Op: opRead, Stream: s.id, Seq: seq,
+			requestCtx := ctx
+			if seq != epoch {
+				// Speculation must not outlive a quiet transfer for seconds
+				// while waiting in admission or retrying a lost future chunk.
+				limited, stop := context.WithTimeout(ctx, 350*time.Millisecond)
+				defer stop()
+				requestCtx = limited
+			}
+			b, err := s.client.rpcACK(requestCtx, frame{Op: opRead, Stream: s.id, Seq: seq,
 				Bulk: s.traffic.Load() >= 4096 && seq != epoch, wake: s.activityChannel}, s.group(seq, opRead), s.readSeq.Load, seq != epoch)
+			if seq != epoch && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				err = errReadPending
+			}
 			results <- completion{seq, epoch, readResult{b, err}}
 		}()
 	}

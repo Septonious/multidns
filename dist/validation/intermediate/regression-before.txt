@@ -1,0 +1,7 @@
+--- FAIL: TestIsolatedLossDoesNotFlapReachableResolver (0.01s)
+    pool_regression_test.go:26: live resolver marked down after isolated loss: {PacingWaitMS:0 PacedQueries:0 RecentLossPercent:50 CapacityBudgetCuts:0 TCPFallbackFailures:0 ReadCooldownMS:0 CapacityLossCuts:1 CapacityDelayCuts:0 CapacityRecoveries:0 Queries:2 Replies:1 Retransmissions:0 Hedges:0 Reconnections:0 Connections:0 Recoveries:0 TCPFallbacks:0 Uploaded:110 Downloaded:0 QueueMS:0 MaxQueueMS:0 MinRTTMS:40 MTU:1232 TXWorkers:0 RXWorkers:0 Timeouts:1 DNSErrors:0 InvalidReplies:0 SocketErrors:0 LastError:DNS exchange timed out Capacity:4 WireInFlight:0 Queued:0 RTTVarianceMS:20 Endpoint:127.0.0.1:48707 RTTMS:40 Goodput:2750 UploadRate:2750 DownloadRate:0 Failures:1 Healthy:false InFlight:0 Checked:2026-10-20 20:51:26.655731673 +0000 UTC m=+0.011789582}
+--- FAIL: TestLargePoolUsesMoreThanEightPathBudget (0.00s)
+    pool_regression_test.go:52: 20 paths share only 240 credits
+FAIL
+FAIL	github.com/Septonious/multidns/core	0.046s
+FAIL

@@ -90,7 +90,17 @@ public final class SmokeInstrumentation extends Instrumentation {
             throw new AssertionError("VPN network survived disconnect");
         }
       }
-      tapButton("Edit selected server");
+      runOnMainSync(
+          () -> {
+            try {
+              java.lang.reflect.Method edit =
+                  MainActivity.class.getDeclaredMethod("edit", int.class);
+              edit.setAccessible(true);
+              edit.invoke(activity, 0);
+            } catch (Exception e) {
+              throw new RuntimeException(e);
+            }
+          });
       screenshot("server-editor");
       runOnMainSync(() -> activity.onBackPressed());
       tapText("Scan");

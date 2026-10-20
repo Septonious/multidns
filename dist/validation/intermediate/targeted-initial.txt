@@ -1,0 +1,6 @@
+--- FAIL: TestResolverCapacityBackpressure (1.73s)
+    congestion_test.go:65: 32768 bytes in 1.603s; retries=31 timeouts=32 dropped=19
+    congestion_test.go:68: persistent resolver overload: 31 retries
+FAIL
+FAIL	github.com/Septonious/multidns/core	2.593s
+FAIL
