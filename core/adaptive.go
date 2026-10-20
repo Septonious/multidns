@@ -69,6 +69,30 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 	sort.Slice(out, func(i, j int) bool { return out[i].Endpoint < out[j].Endpoint })
 	return out
 }
+
+// A lost packet should not hold an ordered window for the full 1.5 s default
+// on a healthy 40 ms path. Keep a jitter/long-poll allowance and the configured
+// timeout as a ceiling; unknown or failing paths retain that full timeout.
+func (c *Client) exchangeTimeout(addr string, op byte) time.Duration {
+	ceiling := time.Duration(c.Profile.TimeoutMS) * time.Millisecond
+	c.adaptiveMu.Lock()
+	h := c.health[addr]
+	rtt := 0.0
+	if h != nil && h.Healthy && h.Failures == 0 {
+		rtt = h.RTTMS
+	}
+	c.adaptiveMu.Unlock()
+	if !c.Profile.Adaptive || rtt <= 0 {
+		return ceiling
+	}
+	allowance := 100 * time.Millisecond
+	if op == opRead {
+		allowance += 80 * time.Millisecond
+	}
+	estimate := max(300*time.Millisecond, time.Duration(rtt*4)*time.Millisecond+allowance)
+	return min(ceiling, estimate)
+}
+
 func (c *Client) recordStart(addr string) {
 	c.adaptiveMu.Lock()
 	defer c.adaptiveMu.Unlock()

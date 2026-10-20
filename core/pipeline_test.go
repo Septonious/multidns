@@ -256,7 +256,7 @@ func TestLargeReplyTruncatesUDPAndRemainsAvailableOverTCP(t *testing.T) {
 }
 
 func TestRollingWindowResumesAfterReaderBackpressure(t *testing.T) {
-	p, _ := testProfile(t)
+	p, server := testProfile(t)
 	p.Window = 32
 	p.TimeoutMS = 500
 	c, err := NewClient(p, nil)
@@ -280,6 +280,14 @@ func TestRollingWindowResumesAfterReaderBackpressure(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	out := make([]byte, len(payload))
 	if _, err := io.ReadFull(conn, out); err != nil {
+		t.Log("client:", c.StatsJSON())
+		server.mu.Lock()
+		for key, stream := range server.streams {
+			stream.mu.Lock()
+			t.Logf("stream %v: nextWrite=%d writes=%d nextRead=%d chunks=%d closed=%v err=%v", key, stream.nextWrite, len(stream.writes), stream.nextRead, len(stream.chunks), stream.closed, stream.err)
+			stream.mu.Unlock()
+		}
+		server.mu.Unlock()
 		t.Fatal("receive window did not recover from backpressure:", err)
 	}
 	if err := <-written; err != nil {

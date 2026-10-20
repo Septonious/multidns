@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,8 +13,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"github.com/miekg/dns"
 )
 
 type Protector interface{ Protect(fd int) bool }
@@ -27,8 +26,9 @@ type Stats struct {
 	Streams    int64  `json:"streams"`
 }
 type Client struct {
-	socketsMu sync.Mutex
-	sockets   map[string]*resolverSocket
+	socketsMu    sync.Mutex
+	sockets      map[string]*resolverSocket
+	socketsEpoch uint64
 
 	adaptiveMu sync.Mutex
 	groups     []Group
@@ -51,17 +51,24 @@ type Client struct {
 	cancel                                                 context.CancelFunc
 	slots                                                  chan struct{}
 	readSlots                                              chan struct{}
+	dataSlots                                              chan struct{}
 	uploadSize                                             int
 }
 
 func NewClient(p Profile, protector Protector) (*Client, error) {
+	return NewClientContext(context.Background(), p, protector)
+}
+
+// NewClientContext permits cancellation even during automatic resolver discovery.
+func NewClientContext(parent context.Context, p Profile, protector Protector) (*Client, error) {
 	if e := p.Validate(); e != nil {
 		return nil, e
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	c := &Client{Profile: p, dialer: &net.Dialer{Timeout: 10 * time.Second}, ctx: ctx, cancel: cancel, slots: make(chan struct{}, 128), names: map[string]nameEntry{}, sockets: map[string]*resolverSocket{}}
 	// Idle download polls must leave capacity for uploads and control requests.
 	c.readSlots = make(chan struct{}, 96)
+	c.dataSlots = make(chan struct{}, 120)
 	c.uploadSize = uploadCapacity(p)
 	var b [8]byte
 	if _, e := rand.Read(b[:]); e != nil {
@@ -89,8 +96,12 @@ func NewClient(p Profile, protector Protector) (*Client, error) {
 		ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
 		c.TestLatency(ctx, nil)
 		cancel()
+		if err := c.ctx.Err(); err != nil {
+			c.Close()
+			return nil, err
+		}
 		if !c.regroup() {
-			c.cancel()
+			c.Close()
 			return nil, fmt.Errorf("no healthy resolvers passed startup checks")
 		}
 	}
@@ -143,6 +154,8 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 	targets := c.raceTargets(groups[group%len(groups)], f.Bulk)
 	results := make(chan result, len(targets))
 	raceCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(c.ctx, cancel)
+	defer stop()
 	defer cancel()
 	for _, addr := range targets {
 		go func(addr string) {
@@ -150,6 +163,15 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				select {
 				case c.readSlots <- struct{}{}:
 					defer func() { <-c.readSlots }()
+				case <-raceCtx.Done():
+					results <- result{e: raceCtx.Err()}
+					return
+				}
+			}
+			if f.Op == opRead || f.Op == opWrite {
+				select {
+				case c.dataSlots <- struct{}{}:
+					defer func() { <-c.dataSlots }()
 				case <-raceCtx.Done():
 					results <- result{e: raceCtx.Err()}
 					return
@@ -164,12 +186,12 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			}
 			started := time.Now()
 			c.recordStart(addr)
-			dc := &dns.Client{Net: "udp", Timeout: time.Duration(c.Profile.TimeoutMS) * time.Millisecond, Dialer: c.dialer}
 			c.queries.Add(1)
 			r, err := c.exchangeUDP(raceCtx, m, addr)
 			if err == nil && r.Truncated {
-				dc.Net = "tcp"
-				r, _, err = dc.ExchangeContext(raceCtx, m.Copy(), addr)
+				tcpCtx, tcpCancel := context.WithTimeout(raceCtx, c.exchangeTimeout(addr, f.Op))
+				r, err = c.exchangeDNS(tcpCtx, m, addr, "tcp")
+				tcpCancel()
 			}
 			var answer frame
 			if err == nil {
@@ -207,7 +229,9 @@ func (c *Client) rpc(ctx context.Context, f frame, base int) ([]byte, error) {
 	return c.rpcACK(ctx, f, base, nil)
 }
 
-func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint32) ([]byte, error) {
+var errReadPending = errors.New("download chunk not ready")
+
+func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint32, waitOnce ...bool) ([]byte, error) {
 	delay := 20 * time.Millisecond
 	group := base
 	for {
@@ -232,6 +256,12 @@ func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint3
 				return nil, fmt.Errorf("server rejected operation %d", f.Op)
 			case statusWait:
 				c.waits.Add(1)
+				if len(waitOnce) > 0 && waitOnce[0] {
+					return nil, errReadPending
+				}
+				if f.Op == opRead {
+					delay = 20 * time.Millisecond
+				}
 			}
 		} else {
 			if ctx.Err() != nil || c.ctx.Err() != nil {
@@ -290,11 +320,12 @@ func (c *Client) DialContext(ctx context.Context, network, address string) (net.
 	if network == "udp" {
 		data = []byte("udp:" + address)
 	}
-	if _, e = c.rpc(ctx, frame{Op: opOpen, Stream: id, Data: data}, base); e != nil {
+	opened, e := c.rpc(ctx, frame{Op: opOpen, Stream: id, Seq: queuedWriteACK, Data: data}, base)
+	if e != nil {
 		return nil, e
 	}
 	streamCtx, cancel := context.WithCancel(c.ctx)
-	s := &Conn{client: c, id: id, base: base, ctx: streamCtx, cancel: cancel}
+	s := &Conn{client: c, id: id, base: base, ctx: streamCtx, cancel: cancel, queuedACK: len(opened) == 1 && opened[0]&byte(queuedWriteACK) != 0}
 	s.reads = make(chan readResult, c.Profile.Window)
 	s.deadlineMu.Lock()
 	s.readDeadline = time.Now().Add(5 * time.Minute)
@@ -313,7 +344,8 @@ type readResult struct {
 	e error
 }
 type Conn struct {
-	traffic atomic.Uint64
+	queuedACK bool
+	traffic   atomic.Uint64
 
 	client                      *Client
 	id                          uint32
@@ -337,6 +369,21 @@ func (s *Conn) group(seq uint32, op byte) int {
 	return s.client.chooseGroup(base, s.traffic.Load() >= 16*1024, op)
 }
 
+// window scales sustained transfers across independent groups, within the
+// server's 64-chunk reorder/credit limit and the client's shared request budget.
+func (s *Conn) window() int {
+	base := s.client.Profile.Window
+	if !s.client.Profile.Adaptive {
+		return base
+	}
+	traffic := s.traffic.Load()
+	if traffic < 4096 {
+		return base
+	}
+	factor := min(len(s.client.groupsSnapshot()), 1+int(traffic/4096))
+	return min(64, base*factor)
+}
+
 func (s *Conn) opContext(read bool) (context.Context, context.CancelFunc) {
 	s.deadlineMu.Lock()
 	d := s.writeDeadline
@@ -352,29 +399,52 @@ func (s *Conn) opContext(read bool) (context.Context, context.CancelFunc) {
 func (s *Conn) prefetch() {
 	defer close(s.reads)
 	type completion struct {
-		seq uint32
+		seq, epoch uint32
 		readResult
 	}
-	window := uint32(s.client.Profile.Window)
-	results := make(chan completion, window)
-	pending := make(map[uint32]readResult, window)
-	next, delivered := uint32(0), uint32(0)
-	launch := func(seq uint32) {
+	results := make(chan completion, 64)
+	pending := make(map[uint32]readResult, 64)
+	active := make(map[uint32]bool, 64)
+	waiting := make(map[uint32]uint32, 64)
+	delivered, window := uint32(0), uint32(1)
+	launch := func(seq, epoch uint32) {
+		active[seq] = true
 		go func() {
 			ctx, cancel := s.opContext(true)
 			defer cancel()
-			b, err := s.client.rpcACK(ctx, frame{Op: opRead, Stream: s.id, Seq: seq, Bulk: s.traffic.Load() >= 16*1024}, s.group(seq, opRead), s.readSeq.Load)
-			results <- completion{seq, readResult{b, err}}
+			// Only the head of an idle stream keeps polling. Speculative future
+			// chunks wait for progress before trying again, avoiding N*window
+			// background polls on HTTP keepalive and upload-only connections.
+			b, err := s.client.rpcACK(ctx, frame{Op: opRead, Stream: s.id, Seq: seq,
+				Bulk: s.traffic.Load() >= 16*1024}, s.group(seq, opRead), s.readSeq.Load, seq != epoch)
+			results <- completion{seq, epoch, readResult{b, err}}
 		}()
 	}
 	for {
-		for next-delivered < window {
-			launch(next)
-			next++
+		for seq := delivered; seq-delivered < window; seq++ {
+			if active[seq] {
+				continue
+			}
+			if _, ok := pending[seq]; ok {
+				continue
+			}
+			if epoch, ok := waiting[seq]; ok && epoch == delivered && seq != delivered {
+				continue
+			}
+			launch(seq, delivered)
 		}
 		select {
 		case result := <-results:
-			pending[result.seq] = result.readResult
+			delete(active, result.seq)
+			if errors.Is(result.e, errReadPending) {
+				waiting[result.seq] = result.epoch
+			} else {
+				delete(waiting, result.seq)
+				pending[result.seq] = result.readResult
+				if result.e == nil && len(result.b) > 0 {
+					window = uint32(s.window())
+				}
+			}
 		case <-s.ctx.Done():
 			return
 		}
@@ -389,6 +459,7 @@ func (s *Conn) prefetch() {
 				return
 			}
 			delete(pending, delivered)
+			delete(waiting, delivered)
 			delivered++
 			if result.e != nil {
 				return
@@ -443,11 +514,12 @@ func (s *Conn) Write(b []byte) (int, error) {
 		index, size int
 		err         error
 	}
-	window := s.client.Profile.Window
-	results := make(chan completion, window)
+	window := s.window()
+	results := make(chan completion, 64)
 	pending := make(map[int]completion, window)
 	next, acknowledged, offset, total := 0, 0, 0, 0
 	for offset < len(b) || acknowledged < next {
+		window = s.window()
 		for offset < len(b) && next-acknowledged < window {
 			size := min(capacity, len(b)-offset)
 			data := append([]byte(nil), b[offset:offset+size]...)
@@ -479,6 +551,14 @@ func (s *Conn) Write(b []byte) (int, error) {
 			total += result.size
 			s.client.uploaded.Add(uint64(result.size))
 			s.traffic.Add(uint64(result.size))
+		}
+	}
+	if s.queuedACK {
+		// Selective acceptance allows the window to pass a missing packet, but
+		// a successful Write still guarantees the full prefix left the server's
+		// userspace queue. The barrier is never sent to a legacy server.
+		if _, err := s.client.rpcACK(ctx, frame{Op: opFlush, Stream: s.id, Seq: s.writeSeq}, s.base, s.readSeq.Load); err != nil {
+			return total, err
 		}
 	}
 	return total, nil

@@ -1,0 +1,15 @@
+=== RUN   TestIdlePollingStaysBounded
+    stability_test.go:56: idle stream: 10 DNS queries per 500ms, window 32 with racing pair
+--- PASS: TestIdlePollingStaysBounded (1.04s)
+=== RUN   TestBlockedDestinationStillAllowsClose
+--- PASS: TestBlockedDestinationStillAllowsClose (0.00s)
+=== RUN   TestLossRecoveryAndLoadedRTT
+    stability_test.go:197: 86016 bytes echoed in 12.427s; 137 retries; loaded probe p50=42ms p95=109ms (110 samples)
+--- PASS: TestLossRecoveryAndLoadedRTT (12.59s)
+=== RUN   TestQueuedACKRequiresFlushAndKeepsCreditBounded
+--- PASS: TestQueuedACKRequiresFlushAndKeepsCreditBounded (0.09s)
+=== RUN   TestTCPFallbackReusesConnectionAndSurvivesReset
+    stability_test.go:310: 24 full-size replies verified over two reused TCP connections, including network reset
+--- PASS: TestTCPFallbackReusesConnectionAndSurvivesReset (0.06s)
+PASS
+ok  	github.com/Septonious/multidns/core	13.856s

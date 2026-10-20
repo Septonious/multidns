@@ -19,6 +19,14 @@ public final class MainActivity extends Activity {
   private JSONArray profiles = new JSONArray();
   private int selected = -1;
   private LinearLayout page, root;
+  private ScrollView scroll;
+  private TextView downValue, upValue, healthValue, trafficValue;
+  private Button connectButton;
+  private final ArrayList<TextView> navLabels = new ArrayList<>();
+  private final ArrayList<Ui.Icon> navIcons = new ArrayList<>();
+  private final ArrayList<LinearLayout> navItems = new ArrayList<>();
+  private int currentTab;
+  private boolean editing;
   private TextView dashboard, scanStatus, scanResults;
   private EditText ranges, workers, timeout, zone;
   private CheckBox txtFilter, nsFilter;
@@ -26,13 +34,13 @@ public final class MainActivity extends Activity {
   private String pendingProfile, exportText;
   private boolean exportingScan;
   private boolean latencyRunning;
+  private boolean scanRefreshing;
   private TextView latencyResults;
   private long statsAt, statsUploaded, statsDownloaded;
   private final Runnable refresh =
       new Runnable() {
         public void run() {
-          if (dashboard != null)
-            dashboard.setText(TunnelService.state + "\n" + connectionSummary());
+          if (dashboard != null) updateDashboard();
           if (scanStatus != null)
             scanStatus.setText(
                 ScannerService.state
@@ -41,14 +49,32 @@ public final class MainActivity extends Activity {
                     + " tested · "
                     + ScannerService.working
                     + " tunnel verified");
-          if (scanResults != null && txtFilter != null)
-            try {
-              scanResults.setText(
-                  ScannerService.display(
-                      MainActivity.this, txtFilter.isChecked(), nsFilter.isChecked(), true));
-            } catch (Exception e) {
-              scanStatus.setText(e.getMessage());
-            }
+          if (scanResults != null && txtFilter != null && !scanRefreshing) {
+            scanRefreshing = true;
+            final TextView output = scanResults;
+            final boolean txt = txtFilter.isChecked(), ns = nsFilter.isChecked();
+            new Thread(
+                    () -> {
+                      String rows;
+                      try {
+                        rows = ScannerService.display(MainActivity.this, txt, ns, true);
+                      } catch (Exception e) {
+                        rows = "Unable to read results: " + e.getMessage();
+                      }
+                      final String snapshot = rows;
+                      handler.post(
+                          () -> {
+                            scanRefreshing = false;
+                            if (scanResults == output)
+                              output.setText(
+                                  snapshot.isEmpty()
+                                      ? "Verified resolvers will appear here."
+                                      : snapshot);
+                          });
+                    },
+                    "multidns-scan-display")
+                .start();
+          }
           handler.postDelayed(this, 1000);
         }
       };
@@ -56,11 +82,17 @@ public final class MainActivity extends Activity {
   @Override
   public void onCreate(Bundle saved) {
     super.onCreate(saved);
-    getWindow().setStatusBarColor(0xff142b41);
-    getWindow().setNavigationBarColor(0xff142b41);
+    getWindow().setStatusBarColor(Ui.BG);
+    getWindow().setNavigationBarColor(Ui.WHITE);
+    getWindow()
+        .getDecorView()
+        .setSystemUiVisibility(
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                | (Build.VERSION.SDK_INT >= 26 ? View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0));
     try {
       profiles = ProfileStore.load(this);
-      if (profiles.length() > 0) selected = 0;
+      if (profiles.length() > 0)
+        selected = Math.min(profiles.length() - 1, getPreferences(0).getInt("selected", 0));
     } catch (Exception e) {
       error("Unable to decrypt saved profiles: " + e.getMessage());
     }
@@ -78,41 +110,194 @@ public final class MainActivity extends Activity {
   private void layout() {
     root = new LinearLayout(this);
     root.setOrientation(LinearLayout.VERTICAL);
-    root.setBackgroundColor(0xfff2f5f8);
-    root.setPadding(dp(12), dp(20), dp(12), dp(8));
-    TextView title = new TextView(this);
-    title.setText("MultiDNS  /  testing prototype");
-    title.setTextSize(22);
-    title.setTextColor(0xff142b41);
-    root.addView(title);
-    LinearLayout nav = new LinearLayout(this);
-    for (String name : new String[] {"Servers", "Scanner", "Routing"}) {
-      Button b = new Button(this);
-      b.setText(name);
-      b.setOnClickListener(
-          v -> {
-            if (name.equals("Servers")) servers();
-            else if (name.equals("Scanner")) scanner();
-            else routing();
-          });
-      nav.addView(b, new LinearLayout.LayoutParams(0, -2, 1));
-    }
-    root.addView(nav);
-    ScrollView scroll = new ScrollView(this);
+    root.setBackgroundColor(Ui.BG);
+    root.setOnApplyWindowInsetsListener(
+        (v, insets) -> {
+          if (Build.VERSION.SDK_INT >= 30) {
+            android.graphics.Insets bars =
+                insets.getInsets(
+                    WindowInsets.Type.systemBars()
+                        | WindowInsets.Type.displayCutout()
+                        | WindowInsets.Type.ime());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+          } else
+            v.setPadding(
+                insets.getSystemWindowInsetLeft(),
+                insets.getSystemWindowInsetTop(),
+                insets.getSystemWindowInsetRight(),
+                insets.getSystemWindowInsetBottom());
+          return insets;
+        });
+    if (Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
+    else
+      getWindow()
+          .getDecorView()
+          .setSystemUiVisibility(
+              getWindow().getDecorView().getSystemUiVisibility()
+                  | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                  | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+    LinearLayout brand = new LinearLayout(this);
+    brand.setGravity(Gravity.CENTER_VERTICAL);
+    brand.setPadding(dp(24), dp(18), dp(24), dp(12));
+    Ui.Icon mark = new Ui.Icon(this, 0);
+    brand.addView(mark, new LinearLayout.LayoutParams(dp(26), dp(26)));
+    TextView word = Ui.label(this, "MultiDNS", 22, Ui.INK, true);
+    word.setPadding(dp(10), 0, 0, 0);
+    brand.addView(word, new LinearLayout.LayoutParams(0, -2, 1));
+    TextView version = Ui.label(this, "0.2", 12, Ui.MUTED, false);
+    version.setContentDescription("Version " + BuildConfig.VERSION_NAME);
+    brand.addView(version);
+    root.addView(brand);
+    scroll = new ScrollView(this);
+    scroll.setFillViewport(true);
+    scroll.setClipToPadding(false);
     page = new LinearLayout(this);
     page.setOrientation(LinearLayout.VERTICAL);
+    page.setPadding(dp(24), dp(12), dp(24), dp(24));
     scroll.addView(page);
     root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    LinearLayout nav = new LinearLayout(this);
+    nav.setBackground(Ui.shape(this, Ui.WHITE, 24, Ui.LINE));
+    nav.setPadding(dp(8), dp(8), dp(8), dp(8));
+    String[] names = {"Connect", "Scanner", "Routing"};
+    for (int i = 0; i < names.length; i++) {
+      final int tab = i;
+      LinearLayout item = new LinearLayout(this);
+      item.setOrientation(LinearLayout.VERTICAL);
+      item.setGravity(Gravity.CENTER);
+      item.setPadding(dp(4), dp(8), dp(4), dp(8));
+      item.setBackground(Ui.ripple(this, Ui.WHITE, 18, 0));
+      Ui.Icon icon = new Ui.Icon(this, i);
+      item.addView(icon, new LinearLayout.LayoutParams(dp(23), dp(23)));
+      TextView label = Ui.label(this, names[i], 12, Ui.MUTED, true);
+      label.setPadding(0, dp(5), 0, 0);
+      item.addView(label);
+      item.setContentDescription(names[i]);
+      item.setFocusable(true);
+      item.setOnClickListener(
+          v -> {
+            if (tab == 0) servers();
+            else if (tab == 1) scanner();
+            else routing();
+          });
+      nav.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
+      navLabels.add(label);
+      navIcons.add(icon);
+      navItems.add(item);
+    }
+    LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, dp(76));
+    np.setMargins(dp(16), 0, dp(16), dp(8));
+    root.addView(nav, np);
     setContentView(root);
+    root.requestApplyInsets();
+  }
+
+  private void selectTab(int tab) {
+    currentTab = tab;
+    for (int i = 0; i < navItems.size(); i++) {
+      navItems.get(i).setBackground(Ui.ripple(this, i == tab ? Ui.SOFT : Ui.WHITE, 18, 0));
+      navItems.get(i).setSelected(i == tab);
+      navLabels.get(i).setTextColor(i == tab ? Ui.ACCENT : Ui.MUTED);
+      navIcons.get(i).color(i == tab ? Ui.ACCENT : Ui.MUTED);
+    }
+  }
+
+  private void heading(String title, String subtitle) {
+    TextView h = Ui.label(this, title, 30, Ui.INK, true);
+    page.addView(h);
+    TextView sub = text(page, subtitle);
+    sub.setTextColor(Ui.MUTED);
+    sub.setPadding(0, dp(8), 0, dp(18));
+  }
+
+  private LinearLayout card(LinearLayout parent) {
+    LinearLayout box = new LinearLayout(this);
+    box.setOrientation(LinearLayout.VERTICAL);
+    box.setPadding(dp(20), dp(20), dp(20), dp(20));
+    box.setBackground(Ui.shape(this, Ui.WHITE, 22, Ui.LINE));
+    LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
+    p.setMargins(0, 0, 0, dp(16));
+    parent.addView(box, p);
+    return box;
+  }
+
+  private LinearLayout section(LinearLayout parent, String title, String subtitle) {
+    LinearLayout box = card(parent);
+    TextView name = Ui.label(this, title, 19, Ui.INK, true);
+    box.addView(name);
+    if (!subtitle.isEmpty()) text(box, subtitle).setTextColor(Ui.MUTED);
+    return box;
+  }
+
+  private LinearLayout fold(LinearLayout parent, String title, String subtitle) {
+    LinearLayout outer = card(parent);
+    TextView toggle = Ui.label(this, title + "  +", 17, Ui.INK, true);
+    toggle.setPadding(0, dp(8), 0, dp(8));
+    toggle.setMinHeight(dp(48));
+    toggle.setGravity(Gravity.CENTER_VERTICAL);
+    outer.addView(toggle);
+    LinearLayout content = new LinearLayout(this);
+    content.setOrientation(LinearLayout.VERTICAL);
+    content.setVisibility(View.GONE);
+    outer.addView(content);
+    if (!subtitle.isEmpty()) text(content, subtitle).setTextColor(Ui.MUTED);
+    toggle.setOnClickListener(
+        v -> {
+          boolean open = content.getVisibility() != View.VISIBLE;
+          content.setVisibility(open ? View.VISIBLE : View.GONE);
+          toggle.setText(title + (open ? "  −" : "  +"));
+          toggle.setContentDescription(title + (open ? ", expanded" : ", collapsed"));
+        });
+    return content;
+  }
+
+  private Spinner choices(LinearLayout parent, String label, String[] values, int selected) {
+    if (!label.isEmpty()) text(parent, label).setTextColor(Ui.MUTED);
+    Spinner spinner = new Spinner(this);
+    spinner.setAdapter(
+        new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, values));
+    spinner.setSelection(Math.max(0, selected));
+    Ui.styleSpinner(spinner);
+    parent.addView(spinner);
+    return spinner;
   }
 
   private void clear() {
+    editing = false;
     page.removeAllViews();
+    scroll.scrollTo(0, 0);
     dashboard = null;
+    connectButton = null;
+    downValue = null;
+    upValue = null;
+    healthValue = null;
+    trafficValue = null;
     scanStatus = null;
     scanResults = null;
     latencyResults = null;
     statsAt = 0;
+  }
+
+  private void updateDashboard() {
+    String state = TunnelService.state;
+    boolean busy =
+        TunnelService.instance != null
+            || state.equals("Connecting")
+            || state.equals("Disconnecting");
+    dashboard.setText(state.startsWith("Connection failed") ? "Connection failed" : state);
+    dashboard.setTextColor(state.equals("Connected") ? Ui.ACCENT : Ui.INK);
+    if (connectButton != null) {
+      connectButton.setText(
+          state.equals("Disconnecting")
+              ? "Disconnecting…"
+              : busy
+                  ? (state.equals("Connecting") ? "Cancel connection" : "Disconnect")
+                  : "Connect");
+      connectButton.setEnabled(!state.equals("Disconnecting") && (busy || profile() != null));
+      Ui.styleButton(connectButton, !busy); // Keep one unambiguous connection control.
+    }
+    connectionSummary();
+    if (state.startsWith("Connection failed") && trafficValue != null) trafficValue.setText(state);
   }
 
   private String connectionSummary() {
@@ -120,6 +305,10 @@ public final class MainActivity extends Activity {
       JSONObject stats = new JSONObject(TunnelService.stats);
       if (!stats.has("queries")) {
         statsAt = 0;
+        if (downValue != null) downValue.setText("0.00");
+        if (upValue != null) upValue.setText("0.00");
+        if (healthValue != null) healthValue.setText("Ready when you are");
+        if (trafficValue != null) trafficValue.setText("Your connection activity appears here.");
         return "";
       }
       long now = SystemClock.elapsedRealtime();
@@ -137,36 +326,43 @@ public final class MainActivity extends Activity {
       int healthy = 0;
       for (int i = 0; resolvers != null && i < resolvers.length(); i++)
         if (resolvers.getJSONObject(i).optBoolean("healthy")) healthy++;
-      return String.format(
-          Locale.US,
-          "↓ %.2f Mbps   ↑ %.2f Mbps\n"
-              + "Downloaded %.2f MiB · Uploaded %.2f MiB\n"
-              + "%d streams · %d groups · %d/%d healthy resolvers\n"
-              + "DNS requests: %d · Valid replies: %d\n"
-              + "Network retries: %d · Server waits: %d",
-          downloadRate, uploadRate, down / 1048576.0, up / 1048576.0,
-          stats.optLong("streams"), groups == null ? 0 : groups.length(),
-          healthy, resolvers == null ? 0 : resolvers.length(),
-          stats.optLong("queries"), stats.optLong("replies"),
-          stats.optLong("retries"), stats.optLong("waits"));
+      if (downValue != null) downValue.setText(String.format(Locale.US, "%.2f", downloadRate));
+      if (upValue != null) upValue.setText(String.format(Locale.US, "%.2f", uploadRate));
+      if (healthValue != null)
+        healthValue.setText(
+            healthy
+                + "/"
+                + (resolvers == null ? 0 : resolvers.length())
+                + " resolvers ready  ·  "
+                + (groups == null ? 0 : groups.length())
+                + " groups");
+      if (trafficValue != null)
+        trafficValue.setText(
+            String.format(
+                Locale.US,
+                "↓ %.1f MB received   ·   ↑ %.1f MB sent\n"
+                    + "%d active streams   ·   %d network retries",
+                down / 1000000.0,
+                up / 1000000.0,
+                stats.optLong("streams"),
+                stats.optLong("retries")));
+      return "";
     } catch (JSONException e) {
       return "Waiting for connection statistics";
     }
   }
 
   private TextView text(LinearLayout parent, String content) {
-    TextView t = new TextView(this);
-    t.setText(content);
-    t.setTextSize(15);
-    t.setPadding(dp(4), dp(9), dp(4), dp(9));
-    t.setTextColor(0xff19364e);
-    parent.addView(t);
+    TextView t = Ui.label(this, content, 14, Ui.INK, false);
+    t.setPadding(0, dp(8), 0, dp(8));
+    parent.addView(t, new LinearLayout.LayoutParams(-1, -2));
     return t;
   }
 
-  private void button(LinearLayout parent, String title, Runnable action) {
+  private Button button(LinearLayout parent, String title, Runnable action) {
     Button b = new Button(this);
     b.setText(title);
+    Ui.styleButton(b, title.startsWith("Save") || title.equals("Start scan"));
     b.setOnClickListener(
         v -> {
           try {
@@ -175,21 +371,32 @@ public final class MainActivity extends Activity {
             error(e.getMessage());
           }
         });
-    parent.addView(b);
+    LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
+    p.setMargins(0, dp(6), 0, dp(6));
+    parent.addView(b, p);
+    return b;
   }
 
   private EditText field(LinearLayout parent, String label, String value, boolean multiline) {
-    text(parent, label);
+    TextView caption = text(parent, label);
+    caption.setTextColor(Ui.MUTED);
+    caption.setTextSize(13);
     EditText e = new EditText(this);
     e.setText(value);
-    e.setTextSize(14);
     e.setSingleLine(!multiline);
+    e.setInputType(
+        InputType.TYPE_CLASS_TEXT
+            | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            | (multiline ? InputType.TYPE_TEXT_FLAG_MULTI_LINE : 0));
     if (multiline) {
       e.setMinLines(3);
       e.setGravity(Gravity.TOP);
-      e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
     }
-    parent.addView(e, new LinearLayout.LayoutParams(-1, -2));
+    Ui.styleField(e);
+    e.setContentDescription(label);
+    LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
+    p.setMargins(0, 0, 0, dp(8));
+    parent.addView(e, p);
     return e;
   }
 
@@ -207,108 +414,168 @@ public final class MainActivity extends Activity {
 
   private void servers() {
     clear();
-    text(
-        page,
-        "Resolver groups race identical requests. Different groups carry independent work. Profiles"
-            + " and authentication keys are encrypted on this device.");
-    dashboard = text(page, TunnelService.state);
-    if (profiles.length() == 0)
-      text(page, "Add your server to begin. You need a delegated domain and the server key.");
+    selectTab(0);
+    heading("Your connection", "A quieter path to the internet.");
+    LinearLayout hero = card(page);
+    TextView eyebrow = text(hero, "CONNECTION");
+    eyebrow.setTextSize(11);
+    eyebrow.setLetterSpacing(.12f);
+    eyebrow.setTextColor(Ui.MUTED);
+    dashboard = Ui.label(this, TunnelService.state, 23, Ui.INK, true);
+    hero.addView(dashboard);
+    if (profile() != null)
+      text(hero, profile().optString("name") + "  ·  " + profile().optString("domain"))
+          .setTextColor(Ui.MUTED);
+    else text(hero, "Add a server to get started.").setTextColor(Ui.MUTED);
+    connectButton =
+        button(
+            hero,
+            "Connect",
+            () -> {
+              if (TunnelService.instance != null || TunnelService.state.equals("Connecting")) {
+                TunnelService.disconnect(this);
+              } else {
+                if (profile() == null) return;
+                pendingProfile = profile().toString();
+                Intent permission = VpnService.prepare(this);
+                if (permission != null) startActivityForResult(permission, 41);
+                else connect();
+              }
+              updateDashboard();
+            });
+    LinearLayout rates = new LinearLayout(this);
+    LinearLayout left = new LinearLayout(this), right = new LinearLayout(this);
+    left.setOrientation(LinearLayout.VERTICAL);
+    right.setOrientation(LinearLayout.VERTICAL);
+    text(left, "↓  Download").setTextColor(Ui.MUTED);
+    text(right, "↑  Upload").setTextColor(Ui.MUTED);
+    downValue = Ui.label(this, "0.00", 30, Ui.INK, true);
+    upValue = Ui.label(this, "0.00", 30, Ui.INK, true);
+    left.addView(downValue);
+    right.addView(upValue);
+    text(left, "Mbps").setTextColor(Ui.MUTED);
+    text(right, "Mbps").setTextColor(Ui.MUTED);
+    rates.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+    rates.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
+    hero.addView(rates);
+    healthValue = text(hero, "Ready when you are");
+    healthValue.setTextColor(Ui.ACCENT);
+    trafficValue = text(hero, "Your connection activity appears here.");
+    trafficValue.setTextColor(Ui.MUTED);
+    trafficValue.setTextSize(12);
+    LinearLayout saved = section(page, "Servers", "Choose a profile for your next connection.");
     for (int i = 0; i < profiles.length(); i++) {
       final int index = i;
       JSONObject p = profiles.optJSONObject(i);
-      button(
-          page,
-          (i == selected ? "● " : "○ ") + p.optString("name") + " · " + p.optString("domain"),
-          () -> {
+      LinearLayout row = new LinearLayout(this);
+      row.setOrientation(LinearLayout.VERTICAL);
+      row.setPadding(dp(16), dp(14), dp(16), dp(14));
+      row.setBackground(
+          Ui.ripple(this, i == selected ? Ui.SOFT : Ui.WHITE, 14, i == selected ? 0 : Ui.LINE));
+      TextView name =
+          Ui.label(
+              this,
+              (i == selected ? "●  " : "○  ") + p.optString("name", "Server"),
+              16,
+              Ui.INK,
+              true);
+      row.addView(name);
+      text(row, p.optString("domain")).setTextColor(Ui.MUTED);
+      row.setOnClickListener(
+          v -> {
             selected = index;
+            getPreferences(0).edit().putInt("selected", selected).apply();
             servers();
           });
+      row.setContentDescription(p.optString("name") + (i == selected ? ", selected" : ""));
+      row.setFocusable(true);
+      LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+      rp.setMargins(0, dp(5), 0, dp(5));
+      saved.addView(row, rp);
     }
-    button(page, "Add server", () -> edit(-1));
+    button(saved, "Add server", () -> edit(-1));
     button(
-        page,
-        "Import profile JSON",
-        () -> {
-          Intent i =
-              new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                  .setType("application/json")
-                  .addCategory(Intent.CATEGORY_OPENABLE);
-          startActivityForResult(i, 42);
-        });
+        saved,
+        "Import profile",
+        () ->
+            startActivityForResult(
+                new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .setType("application/json")
+                    .addCategory(Intent.CATEGORY_OPENABLE),
+                42));
     if (profile() != null) {
-      button(
-          page,
-          "Connect selected server",
-          () -> {
-            pendingProfile = profile().toString();
-            Intent permission = android.net.VpnService.prepare(this);
-            if (permission != null) startActivityForResult(permission, 41);
-            else connect();
+      button(saved, "Edit selected server", () -> edit(selected));
+      Button more = button(saved, "Profile options", () -> {});
+      more.setOnClickListener(
+          v -> {
+            PopupMenu menu = new PopupMenu(this, more);
+            String[] labels = {
+              "Test resolver latency",
+              "Copy diagnostics",
+              "Export without key",
+              "Duplicate server",
+              "Delete server"
+            };
+            for (int i = 0; i < labels.length; i++) menu.getMenu().add(0, i, i, labels[i]);
+            menu.setOnMenuItemClickListener(
+                item -> {
+                  profileAction(item.getItemId());
+                  return true;
+                });
+            menu.show();
           });
-      button(page, "Edit server and resolver groups", () -> edit(selected));
-      button(page, "Test all resolver latencies (VPN off)", this::latencyTest);
-      button(
-          page,
-          "Copy connection diagnostics",
-          () -> {
-            getSystemService(ClipboardManager.class)
-                .setPrimaryClip(ClipData.newPlainText("MultiDNS diagnostics", TunnelService.stats));
-            Toast.makeText(this, "Connection diagnostics copied", Toast.LENGTH_SHORT).show();
-          });
-      button(
-          page,
-          "Export profile without key",
-          () -> {
-            try {
-              JSONObject p = new JSONObject(profile().toString());
-              p.remove("key");
-              exportText = p.toString(2);
-              exportingScan = false;
-              createDocument("multidns-profile.json", "application/json", 43);
-            } catch (Exception e) {
-              error(e.getMessage());
-            }
-          });
-      button(
-          page,
-          "Duplicate server",
-          () -> {
-            try {
-              JSONObject p = new JSONObject(profile().toString());
-              p.put("name", p.optString("name") + " copy");
-              profiles.put(p);
-              selected = profiles.length() - 1;
-              save();
-              servers();
-            } catch (Exception e) {
-              error(e.getMessage());
-            }
-          });
-      button(
-          page,
-          "Delete selected server",
-          () ->
-              new AlertDialog.Builder(this)
-                  .setTitle("Delete server?")
-                  .setMessage(profile().optString("name"))
-                  .setPositiveButton(
-                      "Delete",
-                      (d, w) -> {
-                        profiles.remove(selected);
-                        selected = profiles.length() > 0 ? 0 : -1;
-                        save();
-                        servers();
-                      })
-                  .setNegativeButton("Cancel", null)
-                  .show());
     }
-    button(
-        page,
-        "Disconnect",
-        () -> {
-          startService(new Intent(this, TunnelService.class).setAction("STOP"));
-        });
+    TextView privacy = text(page, "Profiles and server keys are encrypted on this device.");
+    privacy.setTextColor(Ui.MUTED);
+    privacy.setTextSize(12);
+    updateDashboard();
+  }
+
+  private void profileAction(int action) {
+    try {
+      if (action == 0) {
+        latencyTest();
+        return;
+      }
+      if (action == 1) {
+        getSystemService(ClipboardManager.class)
+            .setPrimaryClip(ClipData.newPlainText("MultiDNS diagnostics", TunnelService.stats));
+        Toast.makeText(this, "Diagnostics copied", Toast.LENGTH_SHORT).show();
+        return;
+      }
+      if (action == 2) {
+        JSONObject p = new JSONObject(profile().toString());
+        p.remove("key");
+        exportText = p.toString(2);
+        exportingScan = false;
+        createDocument("multidns-profile.json", "application/json", 43);
+        return;
+      }
+      if (action == 3) {
+        JSONObject p = new JSONObject(profile().toString());
+        p.put("name", p.optString("name") + " copy");
+        profiles.put(p);
+        selected = profiles.length() - 1;
+        save();
+        servers();
+        return;
+      }
+      new AlertDialog.Builder(this)
+          .setTitle("Delete server?")
+          .setMessage(profile().optString("name"))
+          .setPositiveButton(
+              "Delete",
+              (d, w) -> {
+                profiles.remove(selected);
+                selected = profiles.length() > 0 ? 0 : -1;
+                save();
+                servers();
+              })
+          .setNegativeButton("Cancel", null)
+          .show();
+    } catch (Exception e) {
+      error(e.getMessage());
+    }
   }
 
   private void startManagedService(Intent intent) {
@@ -337,16 +604,23 @@ public final class MainActivity extends Activity {
 
   private void edit(int index) {
     clear();
+    selectTab(0);
+    editing = true;
+    heading(index >= 0 ? "Edit server" : "Add server", "Your server, your paths.");
+    LinearLayout identity = section(page, "Server", "Connection details");
     JSONObject original = index >= 0 ? profiles.optJSONObject(index) : empty();
-    EditText name = field(page, "Server name", original.optString("name"), false),
-        domain = field(page, "Delegated tunnel domain", original.optString("domain"), false),
-        client = field(page, "Client ID", original.optString("client_id", "phone"), false),
-        key = field(page, "Server authentication key", original.optString("key"), false);
+    EditText name = field(identity, "Server name", original.optString("name"), false),
+        domain = field(identity, "Delegated tunnel domain", original.optString("domain"), false),
+        client = field(identity, "Client ID", original.optString("client_id", "phone"), false),
+        key = field(identity, "Server authentication key", original.optString("key"), false);
     key.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-    text(
-        page,
-        "One group per line, members separated by commas. Up to 100 active resolvers. For five"
-            + " groups of two, enter five lines with two IPs each.");
+    LinearLayout paths =
+        section(
+            page,
+            "Resolver groups",
+            "Groups share independent work. Members race for the first reply.");
+    text(paths, "One group per line. Separate members with commas. Up to 100 resolvers.")
+        .setTextColor(Ui.MUTED);
     StringBuilder groups = new StringBuilder();
     JSONArray gs = original.optJSONArray("groups");
     for (int i = 0; gs != null && i < gs.length(); i++) {
@@ -357,12 +631,15 @@ public final class MainActivity extends Activity {
       }
       groups.append("\n");
     }
-    EditText members = field(page, "Resolver groups", groups.toString(), true);
-    EditText size = field(page, "Auto-group: resolvers per group", "2", false);
+    EditText members = field(paths, "Resolver groups", groups.toString(), true);
+    LinearLayout groupTools =
+        fold(
+            paths, "Organize resolvers", "Regroup, keep spares, or drag resolvers between groups.");
+    EditText size = field(groupTools, "Auto-group: resolvers per group", "2", false);
     size.setInputType(InputType.TYPE_CLASS_NUMBER);
     button(
-        page,
-        "Regroup all entered resolvers",
+        groupTools,
+        "Regroup entered resolvers",
         () -> {
           try {
             int n = Integer.parseInt(size.getText().toString());
@@ -382,54 +659,55 @@ public final class MainActivity extends Activity {
             error(e.getMessage());
           }
         });
+    LinearLayout tuning =
+        fold(page, "Transport settings", "Automatic tuning keeps short requests responsive.");
     CheckBox adaptive = new CheckBox(this);
     adaptive.setText("Adapt paths: low RTT for short requests, throughput for bulk");
     adaptive.setChecked(original.optBoolean("adaptive", true));
-    page.addView(adaptive);
+    tuning.addView(adaptive);
+    Ui.styleCheck(adaptive);
     CheckBox automatic = new CheckBox(this);
     automatic.setText("Automatically form groups on each connection");
     automatic.setChecked(original.optBoolean("automatic_groups", false));
-    page.addView(automatic);
+    tuning.addView(automatic);
+    Ui.styleCheck(automatic);
     EditText
         groupSize =
             field(
-                page,
+                tuning,
                 "Automatic: resolvers per group",
                 String.valueOf(original.optInt("group_size", 2)),
                 false),
         groupCount =
             field(
-                page,
+                tuning,
                 "Automatic: maximum groups",
                 String.valueOf(original.optInt("group_count", 5)),
                 false);
     groupSize.setInputType(InputType.TYPE_CLASS_NUMBER);
     groupCount.setInputType(InputType.TYPE_CLASS_NUMBER);
     text(
-        page,
+        tuning,
         "Automatic mode tests all candidates concurrently before connecting. Excess healthy"
             + " resolvers stay as spares; a final group can contain fewer members. Health and group"
             + " membership are refreshed while connected.");
     EditText candidatePool =
         field(
-            page,
+            groupTools,
             "Additional candidate / spare resolvers, one per line",
             joinArray(original.optJSONArray("resolver_pool")),
             true);
     LinearLayout board = new LinearLayout(this);
     board.setOrientation(LinearLayout.VERTICAL);
-    page.addView(board);
+    groupTools.addView(board);
     ArrayList<ArrayList<String>> boardGroups = parseGroupText(members.getText().toString());
     ArrayList<String> standby = new ArrayList<>();
     for (String token : candidatePool.getText().toString().split("[\\s,]+"))
       if (!token.trim().isEmpty()) standby.add(token);
-    text(
-        page,
-        "Manual group board: long press a resolver card, then drag it into a group or the spare"
-            + " pool.");
+    text(groupTools, "Hold a resolver to drag it into another group or the spare pool.");
     renderBoard(board, members, candidatePool, boardGroups, standby);
     button(
-        page,
+        groupTools,
         "Refresh cards from text",
         () -> {
           boardGroups.clear();
@@ -440,7 +718,7 @@ public final class MainActivity extends Activity {
           renderBoard(board, members, candidatePool, boardGroups, standby);
         });
     button(
-        page,
+        groupTools,
         "Add empty group to board",
         () -> {
           boardGroups.add(new ArrayList<>());
@@ -451,17 +729,19 @@ public final class MainActivity extends Activity {
         new ArrayAdapter<>(
             this,
             android.R.layout.simple_spinner_dropdown_item,
-            new String[] {"stripe", "affinity"}));
+            new String[] {"Stripe", "Affinity"}));
     mode.setSelection(original.optString("mode").equals("affinity") ? 1 : 0);
-    text(page, "Scheduling mode");
-    page.addView(mode);
+    text(tuning, "Scheduling mode");
+    Ui.styleSpinner(mode);
+    tuning.addView(mode);
     EditText window =
-        field(
-            page,
-            "Outstanding requests per stream (1–32)",
-            "" + original.optInt("window", 8),
-            false);
+        field(tuning, "Base request window (1–32)", "" + original.optInt("window", 8), false);
     window.setInputType(InputType.TYPE_CLASS_NUMBER);
+    text(
+            tuning,
+            "During sustained traffic, adaptive mode can expand this base window up to 64. Shared"
+                + " limits keep room for control traffic.")
+        .setTextColor(Ui.MUTED);
     button(
         page,
         "Save server",
@@ -472,7 +752,7 @@ public final class MainActivity extends Activity {
             p.put("domain", domain.getText().toString().trim());
             p.put("client_id", client.getText().toString().trim());
             p.put("key", key.getText().toString());
-            p.put("mode", mode.getSelectedItem().toString());
+            p.put("mode", mode.getSelectedItemPosition() == 1 ? "affinity" : "stripe");
             p.put("window", Integer.parseInt(window.getText().toString()));
             p.put("adaptive", adaptive.isChecked());
             p.put("automatic_groups", automatic.isChecked());
@@ -536,7 +816,7 @@ public final class MainActivity extends Activity {
       LinearLayout box = new LinearLayout(this);
       box.setOrientation(LinearLayout.VERTICAL);
       box.setPadding(dp(8), dp(8), dp(8), dp(12));
-      box.setBackgroundColor(index < 0 ? 0xffdce6ee : 0xffe0eee6);
+      box.setBackground(Ui.shape(this, index < 0 ? Ui.BG : Ui.SOFT, 14, 0));
       LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
       params.setMargins(0, dp(6), 0, dp(6));
       board.addView(box, params);
@@ -554,8 +834,8 @@ public final class MainActivity extends Activity {
                     : " · not working";
         } catch (Exception ignored) {
         }
-        TextView card = text(box, "▦  " + resolver + measured + "  · hold to drag");
-        card.setBackgroundColor(0xffffffff);
+        TextView card = text(box, resolver + measured + "  ⋮⋮");
+        card.setBackground(Ui.ripple(this, Ui.WHITE, 10, Ui.LINE));
         card.setPadding(dp(12), dp(12), dp(12), dp(12));
         card.setOnLongClickListener(
             v -> {
@@ -610,6 +890,10 @@ public final class MainActivity extends Activity {
     }
     if (profile() == null) return;
     clear();
+    selectTab(0);
+    editing = true;
+    heading("Resolver latency", "Test every candidate through your tunnel server.");
+    button(page, "Back to connection", this::servers);
     text(page, "Concurrent authenticated tunnel probes · VPN remains off");
     latencyResults = text(page, "Testing all candidates…\n");
     final TextView output = latencyResults;
@@ -654,29 +938,37 @@ public final class MainActivity extends Activity {
 
   private void routing() {
     clear();
+    selectTab(2);
+    heading("Routing", "Decide what takes the tunnel.");
     if (profile() == null) {
       text(page, "Add a server first.");
       return;
     }
     JSONObject p = profile();
     text(
-        page,
-        "App selection is applied first. Excluded apps bypass destination rules. For captured"
-            + " traffic, the first matching rule wins; unmatched connections use the default"
-            + " action. Reconnect after editing routing.");
+            page,
+            "App selection is applied first, then destination rules. Reconnect after saving"
+                + " changes.")
+        .setTextColor(Ui.MUTED);
+    LinearLayout appCard =
+        section(page, "Applications", "Choose all apps, an allowlist, or an exclusion list.");
     String[] modes = {"all", "include", "exclude"};
     Spinner appMode = new Spinner(this);
     appMode.setAdapter(
-        new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, modes));
-    appMode.setSelection(Arrays.asList(modes).indexOf(p.optString("app_mode", "all")));
-    page.addView(appMode);
+        new ArrayAdapter<>(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            new String[] {"All apps", "Only selected apps", "Exclude selected apps"}));
+    appMode.setSelection(Math.max(0, Arrays.asList(modes).indexOf(p.optString("app_mode", "all"))));
+    Ui.styleSpinner(appMode);
+    appCard.addView(appMode);
     final LinkedHashSet<String> apps = new LinkedHashSet<>();
     JSONArray saved = p.optJSONArray("apps");
     for (int i = 0; saved != null && i < saved.length(); i++) apps.add(saved.optString(i));
     TextView selectedApps =
-        text(page, apps.isEmpty() ? "No selected apps" : android.text.TextUtils.join("\n", apps));
+        text(appCard, apps.isEmpty() ? "No apps selected" : apps.size() + " apps selected");
     button(
-        page,
+        appCard,
         "Select installed apps",
         () -> {
           Intent launch = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
@@ -692,60 +984,67 @@ public final class MainActivity extends Activity {
             labels[i] = packages.get(ids[i]) + "\n" + ids[i];
             checked[i] = apps.contains(ids[i]);
           }
+          final LinkedHashSet<String> draft = new LinkedHashSet<>(apps);
           new AlertDialog.Builder(this)
               .setTitle("Apps to include or exclude")
               .setMultiChoiceItems(
                   labels,
                   checked,
                   (d, which, on) -> {
-                    if (on) apps.add(ids[which]);
-                    else apps.remove(ids[which]);
+                    if (on) draft.add(ids[which]);
+                    else draft.remove(ids[which]);
                   })
               .setPositiveButton(
-                  "Done", (d, w) -> selectedApps.setText(android.text.TextUtils.join("\n", apps)))
+                  "Done",
+                  (d, w) -> {
+                    apps.clear();
+                    apps.addAll(draft);
+                    selectedApps.setText(apps.size() + " apps selected");
+                  })
               .setNegativeButton("Cancel", null)
               .show();
         });
+    LinearLayout advancedApps =
+        fold(appCard, "Additional apps", "For applications without a launcher icon.");
     EditText appIds =
         field(
-            page,
+            advancedApps,
             "Additional package IDs, one per line (for apps without launcher icons)",
             "",
             true);
+    LinearLayout rulesCard =
+        section(page, "Destination rules", "First match wins. Reconnect to apply your changes.");
     String[] actions = {"tunnel", "direct", "block"};
     Spinner fallback = new Spinner(this);
     fallback.setAdapter(
         new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, actions));
     fallback.setSelection(Arrays.asList(actions).indexOf(p.optString("default_action", "tunnel")));
-    text(page, "Default action");
-    page.addView(fallback);
-    text(
-        page,
-        "Rules are ordered JSON objects. Examples:\n"
-            + "{\"domain\":\"example.org\",\"action\":\"direct\"}\n"
-            + "{\"cidr\":\"192.168.0.0/16\",\"action\":\"direct\"}\n"
-            + "{\"port\":443,\"protocol\":\"udp\",\"action\":\"block\"}\n"
-            + "Optional exact:true matches one domain. Domain rules rely on observed DNS; encrypted"
-            + " external DNS can hide names.");
-    EditText rules =
-        field(
-            page,
-            "Ordered rules",
-            p.optJSONArray("rules") == null ? "[]" : p.optJSONArray("rules").toString(),
-            true);
-    rules.setMinLines(8);
+    text(rulesCard, "Default action");
+    Ui.styleSpinner(fallback);
+    rulesCard.addView(fallback);
+    ArrayList<JSONObject> rules = new ArrayList<>();
+    JSONArray savedRules = p.optJSONArray("rules");
+    for (int i = 0; savedRules != null && i < savedRules.length(); i++)
+      rules.add(savedRules.optJSONObject(i));
+    LinearLayout ruleList = new LinearLayout(this);
+    ruleList.setOrientation(LinearLayout.VERTICAL);
+    rulesCard.addView(ruleList);
+    renderRules(ruleList, rules);
+    button(rulesCard, "Add rule", () -> editRule(ruleList, rules, -1));
+    text(rulesCard, "Domain rules use observed DNS. Encrypted external DNS can hide names.")
+        .setTextColor(Ui.MUTED);
     button(
         page,
         "Save routing",
         () -> {
           try {
             JSONObject copy = new JSONObject(p.toString());
-            copy.put("app_mode", appMode.getSelectedItem().toString());
+            copy.put("app_mode", modes[appMode.getSelectedItemPosition()]);
             for (String id : appIds.getText().toString().split("\\s+"))
               if (!id.trim().isEmpty()) apps.add(id.trim());
             copy.put("apps", new JSONArray(apps));
             copy.put("default_action", fallback.getSelectedItem().toString());
-            copy.put("rules", new JSONArray(rules.getText().toString()));
+            copy.put("rules", new JSONArray(rules));
             Mobile.validate(copy.toString());
             profiles.put(selected, copy);
             save();
@@ -757,40 +1056,189 @@ public final class MainActivity extends Activity {
         });
   }
 
+  private void renderRules(LinearLayout list, ArrayList<JSONObject> rules) {
+    list.removeAllViews();
+    if (rules.isEmpty())
+      text(list, "No rules yet. All traffic uses the default action.").setTextColor(Ui.MUTED);
+    for (int i = 0; i < rules.size(); i++) {
+      final int index = i;
+      JSONObject rule = rules.get(i);
+      LinearLayout row = new LinearLayout(this);
+      row.setGravity(Gravity.CENTER_VERTICAL);
+      row.setPadding(dp(12), dp(8), dp(4), dp(8));
+      row.setBackground(Ui.shape(this, Ui.BG, 14, 0));
+      LinearLayout info = new LinearLayout(this);
+      info.setOrientation(LinearLayout.VERTICAL);
+      String destination = rule.optString("domain", "");
+      if (destination.isEmpty()) destination = rule.optString("cidr", "");
+      if (destination.isEmpty()) destination = "All destinations";
+      TextView name = Ui.label(this, (i + 1) + ".  " + destination, 15, Ui.INK, true);
+      info.addView(name);
+      text(
+              info,
+              rule.optString("action", "tunnel")
+                  + " · "
+                  + rule.optString("protocol", "any protocol")
+                  + (rule.optInt("port", 0) > 0 ? " · port " + rule.optInt("port") : ""))
+          .setTextColor(Ui.MUTED);
+      row.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
+      info.setOnClickListener(v -> editRule(list, rules, index));
+      Button more = new Button(this);
+      more.setText("⋮");
+      more.setContentDescription("Options for rule " + (i + 1));
+      Ui.styleButton(more, false);
+      row.addView(more, new LinearLayout.LayoutParams(dp(48), dp(48)));
+      more.setOnClickListener(
+          v -> {
+            PopupMenu menu = new PopupMenu(this, more);
+            menu.getMenu().add(0, 0, 0, "Edit");
+            menu.getMenu().add(0, 1, 1, "Move up").setEnabled(index > 0);
+            menu.getMenu().add(0, 2, 2, "Move down").setEnabled(index < rules.size() - 1);
+            menu.getMenu().add(0, 3, 3, "Delete");
+            menu.setOnMenuItemClickListener(
+                item -> {
+                  int action = item.getItemId();
+                  if (action == 0) editRule(list, rules, index);
+                  else {
+                    if (action == 1) Collections.swap(rules, index, index - 1);
+                    else if (action == 2) Collections.swap(rules, index, index + 1);
+                    else rules.remove(index);
+                    renderRules(list, rules);
+                  }
+                  return true;
+                });
+            menu.show();
+          });
+      LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+      rp.setMargins(0, dp(5), 0, dp(5));
+      list.addView(row, rp);
+    }
+  }
+
+  private void editRule(LinearLayout list, ArrayList<JSONObject> rules, int index) {
+    JSONObject rule = index < 0 ? new JSONObject() : rules.get(index);
+    LinearLayout form = new LinearLayout(this);
+    form.setOrientation(LinearLayout.VERTICAL);
+    form.setPadding(dp(20), dp(4), dp(20), dp(12));
+    EditText domain = field(form, "Domain (optional)", rule.optString("domain"), false);
+    EditText cidr = field(form, "IP network / CIDR (optional)", rule.optString("cidr"), false);
+    EditText port =
+        field(
+            form,
+            "Port (optional)",
+            rule.optInt("port") == 0 ? "" : "" + rule.optInt("port"),
+            false);
+    port.setInputType(InputType.TYPE_CLASS_NUMBER);
+    String[] protocols = {"any", "tcp", "udp"}, actions = {"tunnel", "direct", "block"};
+    Spinner protocol =
+        choices(
+            form,
+            "Protocol",
+            protocols,
+            Arrays.asList(protocols).indexOf(rule.optString("protocol", "any")));
+    Spinner action =
+        choices(
+            form,
+            "Action",
+            actions,
+            Arrays.asList(actions).indexOf(rule.optString("action", "tunnel")));
+    CheckBox exact = new CheckBox(this);
+    exact.setText("Match this domain only");
+    exact.setChecked(rule.optBoolean("exact"));
+    Ui.styleCheck(exact);
+    form.addView(exact);
+    ScrollView scroller = new ScrollView(this);
+    scroller.addView(form);
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle(index < 0 ? "Add rule" : "Edit rule")
+            .setView(scroller)
+            .setPositiveButton("Done", null)
+            .setNegativeButton("Cancel", null)
+            .create();
+    dialog.setOnShowListener(
+        d ->
+            dialog
+                .getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(
+                    v -> {
+                      try {
+                        JSONObject updated = new JSONObject(rule.toString());
+                        updated.remove("domain");
+                        updated.remove("cidr");
+                        updated.remove("port");
+                        updated.remove("protocol");
+                        if (!domain.getText().toString().trim().isEmpty())
+                          updated.put("domain", domain.getText().toString().trim());
+                        if (!cidr.getText().toString().trim().isEmpty())
+                          updated.put("cidr", cidr.getText().toString().trim());
+                        if (!port.getText().toString().trim().isEmpty())
+                          updated.put("port", Integer.parseInt(port.getText().toString().trim()));
+                        if (protocol.getSelectedItemPosition() > 0)
+                          updated.put("protocol", protocol.getSelectedItem().toString());
+                        updated.put("action", action.getSelectedItem().toString());
+                        updated.put("exact", exact.isChecked());
+                        JSONObject validation = new JSONObject(profile().toString());
+                        validation.put("rules", new JSONArray().put(updated));
+                        Mobile.validate(validation.toString());
+                        if (index < 0) rules.add(updated);
+                        else rules.set(index, updated);
+                        renderRules(list, rules);
+                        dialog.dismiss();
+                      } catch (Exception e) {
+                        error(e.getMessage());
+                      }
+                    }));
+    dialog.show();
+  }
+
   private void scanner() {
     clear();
+    selectTab(1);
+    heading("Find your paths", "Discover resolvers that carry your tunnel.");
     if (profile() == null) {
       text(page, "Add a server profile so the scanner can verify the actual tunnel.");
       return;
     }
-    text(
-        page,
-        "Results stream live and are stored on disk. Arbitrary numbers of ranges are processed"
-            + " lazily. IPv6 ranges are exhaustive; choose narrow ranges. Scanner sockets bypass"
-            + " this VPN.");
+    text(page, "Results are saved as they arrive. Pause and resume without losing your place.")
+        .setTextColor(Ui.MUTED);
+    LinearLayout settings = section(page, "Scan settings", "Targets and limits");
     android.content.SharedPreferences prefs = getSharedPreferences("scanner", 0);
     ranges =
         field(
-            page,
+            settings,
             "IPs, CIDRs, or start–end ranges",
             prefs.getString("ranges", "1.1.1.1\n8.8.8.8"),
             true);
-    workers = field(page, "DNS workers (1–256)", prefs.getString("workers", "16"), false);
+    LinearLayout scanAdvanced =
+        fold(settings, "Scan options", "For IPv6, use narrow ranges. Scans bypass this VPN.");
+    workers = field(scanAdvanced, "DNS workers (1–256)", prefs.getString("workers", "16"), false);
     timeout =
-        field(page, "Timeout per test, milliseconds", prefs.getString("timeout", "1500"), false);
-    zone = field(page, "NS probe zone (optional)", prefs.getString("zone", ""), false);
+        field(
+            scanAdvanced,
+            "Timeout per test, milliseconds",
+            prefs.getString("timeout", "1500"),
+            false);
+    zone = field(scanAdvanced, "NS probe zone (optional)", prefs.getString("zone", ""), false);
     workers.setInputType(InputType.TYPE_CLASS_NUMBER);
     timeout.setInputType(InputType.TYPE_CLASS_NUMBER);
+    LinearLayout results =
+        section(page, "Live results", "Only authenticated tunnel matches are included.");
     txtFilter = new CheckBox(this);
     txtFilter.setText("Only TXT verified");
     txtFilter.setChecked(true);
-    page.addView(txtFilter);
+    results.addView(txtFilter);
+    Ui.styleCheck(txtFilter);
     nsFilter = new CheckBox(this);
     nsFilter.setText("Also require NS → A");
-    page.addView(nsFilter);
-    scanStatus = text(page, ScannerService.state);
-    scanResults = text(page, "");
+    results.addView(nsFilter);
+    Ui.styleCheck(nsFilter);
+    scanStatus = text(results, ScannerService.state);
+    scanResults = text(results, "");
     scanResults.setTextIsSelectable(true);
+    scanResults.setTypeface(android.graphics.Typeface.MONOSPACE);
+    scanResults.setTextSize(12);
+    page.removeView(results);
     button(
         page,
         "Start scan",
@@ -842,9 +1290,12 @@ public final class MainActivity extends Activity {
         page,
         "Pause / stop scan",
         () -> startService(new Intent(this, ScannerService.class).setAction("STOP")));
+    page.addView(results);
+    LinearLayout exports =
+        fold(page, "Use these results", "Copy, export, or add matching resolvers to your server.");
     button(
-        page,
-        "Copy all matching IPs, one per line",
+        exports,
+        "Copy matching resolvers",
         () -> {
           try {
             String s =
@@ -858,15 +1309,15 @@ public final class MainActivity extends Activity {
           }
         });
     button(
-        page,
-        "Export matching resolver list",
+        exports,
+        "Export resolver list",
         () -> {
           exportingScan = true;
           createDocument("multidns-resolvers.txt", "text/plain", 43);
         });
     button(
-        page,
-        "Add matching results to selected profile",
+        exports,
+        "Add results to server",
         () -> {
           try {
             String s =
@@ -968,6 +1419,15 @@ public final class MainActivity extends Activity {
         .setMessage(message == null ? "Unknown error" : message)
         .setPositiveButton("OK", null)
         .show();
+  }
+
+  @Override
+  public void onBackPressed() {
+    if (editing || currentTab != 0) {
+      servers();
+      return;
+    }
+    super.onBackPressed();
   }
 
   @Override

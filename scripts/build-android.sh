@@ -33,5 +33,7 @@ tasks=(assembleDebug lintDebug)
 if [ "${CLEAN_ANDROID:-0}" = 1 ]; then
  tasks=(clean "${tasks[@]}")
 fi
-./gradlew --no-daemon "${tasks[@]}"
+gradle_args=(--no-daemon)
+if [ "${GRADLE_OFFLINE:-0}" = 1 ]; then gradle_args+=(--offline); fi
+./gradlew "${gradle_args[@]}" "${tasks[@]}"
 python3 ../scripts/check-android-native.py app/build/outputs/apk/debug/app-debug.apk

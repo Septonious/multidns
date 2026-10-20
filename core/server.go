@@ -33,6 +33,7 @@ type serverStream struct {
 	closed    bool
 	last      time.Time
 	readSize  int
+	queuedACK bool
 }
 type Server struct {
 	Domain, Key string
@@ -93,7 +94,7 @@ func (s *Server) handle(f frame) []byte {
 			s.mu.Unlock()
 			return []byte{statusError}
 		}
-		st = &serverStream{ready: make(chan struct{}), notify: make(chan struct{}), writes: map[uint32][]byte{}, chunks: map[uint32][]byte{}, last: time.Now(), readSize: s.readSize}
+		st = &serverStream{ready: make(chan struct{}), notify: make(chan struct{}), writes: map[uint32][]byte{}, chunks: map[uint32][]byte{}, last: time.Now(), readSize: s.readSize, queuedACK: f.Seq&queuedWriteACK != 0}
 		s.streams[k] = st
 		go st.open(f.Data)
 	}
@@ -127,6 +128,9 @@ func (s *Server) handle(f frame) []byte {
 	}
 	switch f.Op {
 	case opOpen:
+		if st.queuedACK {
+			return []byte{statusOK, byte(queuedWriteACK)}
+		}
 		return []byte{statusOK}
 	case opWrite:
 		if st.closed {
@@ -141,28 +145,30 @@ func (s *Server) handle(f frame) []byte {
 		if _, ok := st.writes[f.Seq]; !ok {
 			st.writes[f.Seq] = append([]byte(nil), f.Data...)
 		}
-		// Flush the contiguous prefix together instead of emitting one tiny TCP
-		// write for every DNS upload. Datagram framing is preserved by writePayload.
-		var payload []byte
-		nextWrite := st.nextWrite
-		for {
-			b, ok := st.writes[nextWrite]
-			if !ok {
-				break
-			}
-			payload = append(payload, b...)
-			nextWrite++
+		st.signal() // The writer drains the bounded, ordered queue outside st.mu.
+		if st.queuedACK {
+			return []byte{statusOK}
 		}
-		if nextWrite != st.nextWrite {
-			_ = st.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
-			if e := st.writePayload(payload); e != nil {
-				st.err = e
-				return []byte{statusError}
+		// Legacy clients receive ACKs only for committed bytes. Close after a successful Write must not
+		// discard a tail still waiting in the userspace reorder queue.
+		timer := time.NewTimer(80 * time.Millisecond)
+		defer timer.Stop()
+		for st.nextWrite <= f.Seq && st.err == nil && !st.closed {
+			wake := st.notify
+			st.mu.Unlock()
+			expired := false
+			select {
+			case <-wake:
+			case <-timer.C:
+				expired = true
 			}
-			for st.nextWrite < nextWrite {
-				delete(st.writes, st.nextWrite)
-				st.nextWrite++
+			st.mu.Lock()
+			if expired {
+				return []byte{statusWait}
 			}
+		}
+		if st.err != nil || st.closed {
+			return []byte{statusError}
 		}
 		return []byte{statusOK}
 	case opRead:
@@ -196,6 +202,30 @@ func (s *Server) handle(f frame) []byte {
 				return []byte{statusWait}
 			}
 		}
+	case opFlush:
+		if !st.queuedACK {
+			return []byte{statusError}
+		}
+		timer := time.NewTimer(80 * time.Millisecond)
+		defer timer.Stop()
+		for st.nextWrite < f.Seq && st.err == nil && !st.closed {
+			wake := st.notify
+			st.mu.Unlock()
+			expired := false
+			select {
+			case <-wake:
+			case <-timer.C:
+				expired = true
+			}
+			st.mu.Lock()
+			if expired {
+				return []byte{statusWait}
+			}
+		}
+		if st.err != nil || st.closed {
+			return []byte{statusError}
+		}
+		return []byte{statusOK}
 	case opHalfClose:
 		if f.Seq != st.nextWrite {
 			return []byte{statusWait}
@@ -243,6 +273,7 @@ func (st *serverStream) open(data []byte) {
 	if e != nil {
 		return
 	}
+	go st.flushWrites()
 	for {
 		st.mu.Lock()
 		full := len(st.chunks) >= 64
@@ -265,6 +296,25 @@ func (st *serverStream) open(data []byte) {
 		}
 		_ = c.SetReadDeadline(time.Now().Add(3 * time.Minute))
 		n, e := c.Read(b)
+		if network == "tcp" && n > 0 && n < len(b) && e == nil {
+			// Tiny destination writes otherwise consume one entire DNS chunk and
+			// receive-credit slot each. Briefly coalesce them without waiting for
+			// a full chunk on interactive traffic (at most 2 ms added latency).
+			_ = c.SetReadDeadline(time.Now().Add(2 * time.Millisecond))
+			for n < len(b) {
+				more, err := c.Read(b[n:])
+				n += more
+				if err != nil {
+					if timeout, ok := err.(net.Error); !ok || !timeout.Timeout() {
+						e = err
+					}
+					break
+				}
+				if more == 0 {
+					break
+				}
+			}
+		}
 		if network == "udp" && n > 0 {
 			packet := make([]byte, n+4)
 			binary.BigEndian.PutUint32(packet, uint32(n))
@@ -286,6 +336,51 @@ func (st *serverStream) open(data []byte) {
 		}
 	}
 }
+
+// A slow destination must not hold the stream mutex (or hundreds of DNS
+// handlers) while its TCP send buffer is full. The queue is bounded and
+// negotiated queued ACKs are paired with a delivery barrier before Write returns.
+func (st *serverStream) flushWrites() {
+	for {
+		st.mu.Lock()
+		if st.closed || st.err != nil {
+			st.mu.Unlock()
+			return
+		}
+		start, end := st.nextWrite, st.nextWrite
+		var payload []byte
+		for {
+			b, ok := st.writes[end]
+			if !ok {
+				break
+			}
+			payload = append(payload, b...)
+			end++
+		}
+		wake := st.notify
+		st.mu.Unlock()
+		if start == end {
+			<-wake
+			continue
+		}
+		_ = st.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
+		err := st.writePayload(payload)
+		st.mu.Lock()
+		if err != nil {
+			st.err = err
+			st.signal()
+			st.mu.Unlock()
+			return
+		}
+		for st.nextWrite < end {
+			delete(st.writes, st.nextWrite)
+			st.nextWrite++
+		}
+		st.signal()
+		st.mu.Unlock()
+	}
+}
+
 func (st *serverStream) appendChunk(b []byte) {
 	for {
 		st.mu.Lock()

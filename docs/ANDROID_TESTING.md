@@ -2,11 +2,21 @@
 
 Install the debug APK on Android 7.0/API 24 or newer, arm64 or x86_64.
 The APK is debug-signed for testing; preserve its signing key to update an existing
-installation. A different Actions runner can generate a different debug key, in
+installation. Use `MULTIDNS_DEBUG_KEYSTORE=/absolute/path/to/debug.keystore`
+or `multidns.debugKeystore` in the ignored `android/local.properties` file to
+select the retained debug signing key explicitly for direct Gradle builds too.
+The debug store uses the standard Android debug credentials; never commit it.
+A different Actions runner can generate a different debug key, in
 which case uninstalling the previous APK is necessary before installation.
 
-Version 0.1.2 uses rolling request windows and shows live payload rates instead
-of raw JSON. "Copy connection diagnostics" retains access to the full counters
+Version 0.2.0 replaces the screens with a native card layout, persistent bottom
+navigation, one connection toggle, expandable advanced settings, and a visual
+ordered routing-rule editor. Disconnect closes the VPN interface immediately and
+cancels startup discovery/probes. Reconnect creates a new engine. A notification
+Disconnect action uses the same shutdown path. Saved profiles and the signing
+certificate are retained.
+
+Live payload rates are shown instead of raw JSON. **Profile options → Copy diagnostics** retains access to the full counters
 and per-resolver state without including the authentication key. Update the
 server as well to enable bounded read long-polls and larger replies. Start with
 window 8 for comparison, then try 16; see [performance tuning](PERFORMANCE.md).
@@ -25,9 +35,9 @@ the old shared library when a source file is removed from its link inputs.
 
 1. Deploy the Linux server and delegate its tunnel domain using NS and A/AAAA.
 2. Add a server profile with the domain and matching random authentication key.
-3. Enter the candidate resolvers. Press **Test all resolver latencies (VPN off)**.
+3. Enter the candidate resolvers. Choose **Profile options → Test resolver latency**.
    This runs two authenticated probes per endpoint with up to 16 concurrent workers.
-4. For manual grouping, open the editor, long press a resolver card, and drag it
+4. For manual grouping, open **Organize resolvers**, long press a resolver card, and drag it
    into a group or spare pool. Text input and automatic partitioning are also available.
 5. For startup grouping, enable automatic groups and set members/group and maximum
    groups. The candidate pool includes both entered groups and additional spares.
@@ -78,3 +88,24 @@ A packaged APK and passing lint do not establish VPN behavior on a physical phon
 Device checks include screen-off operation, background scans, app selection,
 network transitions, split routing, and battery use. These must be tested on target
 devices with a real delegated domain and server.
+
+## Isolated emulator lifecycle test
+
+`SmokeInstrumentation` is packaged only in the test APK. It replaces the emulator's
+saved profile with a public fixture and must run on a disposable emulator, not a
+phone containing user profiles. Grant notifications and the ACTIVATE_VPN app-op
+with adb, install the app and test APK, and launch:
+
+```bash
+adb shell am instrument -w -e target HOST_LAN_IP \
+  org.multidns.app.test/org.multidns.app.SmokeInstrumentation
+```
+
+The fixture server must listen on host UDP/TCP 15353, serve `t.test`, and use key
+`device-smoke-test-key-not-production`. A TCP echo endpoint must listen on host
+port 18080. The profile reaches the DNS fixture through emulator address
+`10.0.2.2`; `HOST_LAN_IP` is the echo destination as seen from the server.
+The test checks a byte-verified 16 KiB transfer through the VPN, three actual UI
+Connect/Disconnect cycles, disappearance of the VPN network, cancellation during
+automatic discovery, and captures each redesigned screen. Screenshots are saved
+under the target app's external files directory in `smoke-screenshots`.

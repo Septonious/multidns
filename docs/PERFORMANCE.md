@@ -1,5 +1,66 @@
 # Performance and tuning
 
+## Version 0.2.0: lifecycle, load handling and sustained traffic
+
+The base window saved in existing profiles remains unchanged. In adaptive mode,
+useful traffic gradually widens the per-stream window after 4 KiB, bounded by the
+base window times active group count and 64. Fixed-window mode remains available
+by disabling adaptive scheduling. Default shared limits stay at 128 exchanges,
+96 download exchanges and 120 data exchanges; eight positions remain available
+for connection control. Larger per-stream windows do not raise that global cap.
+
+Only an idle stream's head read continues polling. Future WAIT positions wait for
+ordered progress. A 32-position stream with a racing pair used 10 DNS requests
+in a measured idle 500 ms interval. Healthy paths use an RTT-based retransmission
+timeout with jitter allowance, a 300 ms floor and the configured timeout ceiling.
+
+Supporting clients and servers negotiate selective queued upload ACKs, then use
+a flush barrier before a successful Write returns. This recovers missing packets
+without holding every later packet at an acknowledgement barrier and preserves
+delivery on close. Destination writes run outside the stream mutex, so stalled
+TCP destinations do not block read/close. Tiny destination TCP writes coalesce
+for at most 2 ms. UDP framing remains intact. TCP fallback reuses a multiplexed
+connection instead of opening one for every truncated response; 24 full-size
+replies were verified across two connections with a network reset in between.
+Socket creation never holds the shared map lock across protection/dial callbacks;
+reset invalidates in-progress old-network dials. DNS writes honor deadlines.
+
+### Latest controlled comparison
+
+Baseline is `62d8474` (0.1.2). Both versions use the **same** benchmark with adaptive
+mode enabled: five groups of two endpoints, base window 8, 40 ms delay plus 40 ms
+on every eighth sequence, a 500 ms timeout and a byte-verified 73,728-byte HTTP
+transfer. These adaptive results are a new comparison; the earlier 0.1.1→0.1.2
+measurements below used fixed windows and are historical.
+
+| Direction | 0.1.2 median | 0.2.0 median | Relative payload rate |
+|---|---:|---:|---:|
+| Upload | 6.745 s | 2.355 s | 2.86× |
+| Download | 1.029 s | 0.548 s | 1.88× |
+
+Three one-transfer runs per direction are retained in `dist/validation/`, with
+raw timings, request/retry counts and machine-readable medians. The larger
+prefetch window can send more speculative requests at the end of a download;
+these are bounded and do not continue as full-window idle polling. One download
+run had four retries and took 1.219 s. Results vary with host scheduling and are
+not predictions or guarantees for public resolvers or the user's phone.
+
+A separate 40 ms path test drops both initial raced requests for every nineteenth
+selected upload sequence. An 86,016-byte echo completed with byte-for-byte
+integrity; concurrent authenticated probes measured p50 42 ms / p95 109 ms across
+110 samples. This is an intentionally correlated-loss fixture, not a measured
+public-network loss rate. Bounds, duplicate operations, delayed consumers,
+network resets, TCP truncation fallback, blocked destinations, and cancellation
+are also checked under the Go race detector.
+
+Keep the same resolver groups for the first phone comparison. Use adaptive mode
+and base window 8, with background scans stopped. Compare sustained transfers,
+loaded latency and retries before raising the base window to 16. Resolver IPs can
+share an upstream/rate limit; adding addresses is not guaranteed additive capacity.
+
+## Historical 0.1.2 changes
+
+
 Version 0.1.2 addresses transport bottlenecks found after the first successful
 Android connection. The user's initial measurement was 2.71 Mbps down and
 0.15 Mbps up with five racing groups of two resolvers and 38.8–48.1 ms probe RTT.

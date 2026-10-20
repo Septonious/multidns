@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.net.*;
 import android.os.*;
 import android.util.Log;
-import java.util.concurrent.atomic.AtomicBoolean;
 import mobile.Engine;
 import mobile.Mobile;
 import org.json.*;
@@ -14,7 +13,6 @@ public final class TunnelService extends VpnService {
   static volatile String state = "Disconnected";
   static volatile String stats = "{}";
   static volatile TunnelService instance;
-  private final AtomicBoolean starting = new AtomicBoolean();
   private volatile boolean stopping;
   private Engine engine;
   private ParcelFileDescriptor tun;
@@ -39,47 +37,41 @@ public final class TunnelService extends VpnService {
         Build.VERSION.SDK_INT >= 26
             ? new Notification.Builder(c, "multidns")
             : new Notification.Builder(c);
-    return builder
+    builder
         .setContentTitle(title)
-        .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+        .setSmallIcon(org.multidns.app.R.drawable.ic_status)
         .setContentIntent(open)
         .setOngoing(true)
-        .build();
+        .setOnlyAlertOnce(true);
+    if (id == 1) {
+      PendingIntent disconnect =
+          PendingIntent.getService(
+              c,
+              10,
+              new Intent(c, TunnelService.class).setAction("STOP"),
+              PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+      builder.addAction(new Notification.Action.Builder(null, "Disconnect", disconnect).build());
+    }
+    return builder.build();
   }
 
   @Override
   public int onStartCommand(Intent intent, int flags, int startId) {
-    if (intent == null) return START_NOT_STICKY;
-    if ("STOP".equals(intent.getAction())) {
-      stopSelf();
+    if (intent == null || "STOP".equals(intent.getAction())) {
+      shutdown();
       return START_NOT_STICKY;
     }
-    try {
-      startForeground(1, notification(this, "MultiDNS connecting", 1));
-    } catch (RuntimeException e) {
-      connectionFailed("VPN service startup", e);
+    if (engine != null || stopping || (instance != null && instance != this)) {
+      if (instance != this) stopSelf();
       return START_NOT_STICKY;
     }
-    if (!starting.compareAndSet(false, true)) return START_NOT_STICKY;
-    stopping = false;
     instance = this;
-    String config = intent.getStringExtra("profile");
-    new Thread(() -> connect(config), "multidns-connect").start();
-    return START_NOT_STICKY;
-  }
-
-  private void connect(String config) {
+    state = "Connecting";
+    stats = "{}";
     try {
-      state = "Connecting";
-      JSONObject p = new JSONObject(config);
-      Mobile.validate(config);
-      NativeTunnel.ensureLoaded();
+      startForeground(1, notification(this, "MultiDNS · Connecting", 1));
+      engine = Mobile.newEngine();
       connectivity = getSystemService(ConnectivityManager.class);
-      NetworkRequest request =
-          new NetworkRequest.Builder()
-              .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-              .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-              .build();
       for (Network n : connectivity.getAllNetworks()) {
         NetworkCapabilities caps = connectivity.getNetworkCapabilities(n);
         if (caps != null
@@ -93,31 +85,67 @@ public final class TunnelService extends VpnService {
           new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(Network n) {
-              network = n;
-              setUnderlyingNetworks(new Network[] {n});
-              if (engine != null)
-                new Thread(() -> engine.networkChanged(), "multidns-rebind").start();
-              if (tun != null) state = "Connected";
+              handler.post(
+                  () -> {
+                    if (stopping) return;
+                    if (n.equals(network)) return;
+                    network = n;
+                    setUnderlyingNetworks(new Network[] {n});
+                    final Engine current = engine;
+                    if (current != null)
+                      new Thread(current::networkChanged, "multidns-rebind").start();
+                    if (tun != null) state = "Connected";
+                  });
             }
 
             @Override
             public void onLost(Network n) {
-              if (n.equals(network)) {
-                network = null;
-                state = "Waiting for network";
-              }
+              handler.post(
+                  () -> {
+                    if (!stopping && n.equals(network)) {
+                      network = null;
+                      if (tun != null) state = "Waiting for network";
+                    }
+                  });
             }
           };
-      connectivity.registerNetworkCallback(request, callback);
-      engine = Mobile.newEngine();
-      engine.start(config, 10808, fd -> protectFD((int) fd));
-      if (stopping) {
-        engine.stop();
-        return;
-      }
+      connectivity.registerNetworkCallback(
+          new NetworkRequest.Builder()
+              .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+              .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+              .build(),
+          callback);
+      final String config = intent.getStringExtra("profile");
+      final Engine current = engine;
+      new Thread(
+              () -> {
+                try {
+                  Mobile.validate(config);
+                  NativeTunnel.ensureLoaded();
+                  if (stopping) return;
+                  current.start(config, 10808, fd -> protectFD((int) fd));
+                  handler.post(() -> establish(config));
+                } catch (Exception | LinkageError e) {
+                  handler.post(() -> connectionFailed("Connection", e));
+                }
+              },
+              "multidns-connect")
+          .start();
+    } catch (Exception | LinkageError e) {
+      connectionFailed("VPN startup", e);
+    }
+    return START_NOT_STICKY;
+  }
+
+  // All resource publication and VPN lifecycle changes happen on the main thread.
+  // A canceled startup can never establish or resurrect the VPN afterward.
+  private void establish(String config) {
+    if (stopping) return;
+    try {
+      JSONObject p = new JSONObject(config);
       Builder b =
           new Builder()
-              .setSession("MultiDNS · " + p.optString("name", "server"))
+              .setSession("MultiDNS · " + p.optString("name", "Server"))
               .setMtu(1280)
               .addAddress("10.77.0.2", 30)
               .addAddress("fd77::2", 126)
@@ -126,21 +154,15 @@ public final class TunnelService extends VpnService {
               .addDnsServer("1.1.1.1");
       JSONArray apps = p.optJSONArray("apps");
       String mode = p.optString("app_mode", "all");
-      if ("include".equals(mode)) {
-        for (int i = 0; apps != null && i < apps.length(); i++)
-          b.addAllowedApplication(apps.getString(i));
-      } else if ("exclude".equals(mode)) {
-        for (int i = 0; apps != null && i < apps.length(); i++)
-          b.addDisallowedApplication(apps.getString(i));
+      for (int i = 0; apps != null && i < apps.length(); i++) {
+        if ("include".equals(mode)) b.addAllowedApplication(apps.getString(i));
+        else if ("exclude".equals(mode)) b.addDisallowedApplication(apps.getString(i));
       }
       if (network != null) b.setUnderlyingNetworks(new Network[] {network});
       tun = b.establish();
       if (tun == null) throw new Exception("VPN permission was revoked");
-      if (stopping) {
-        tun.close();
-        return;
-      }
-      String yaml =
+      final int fd = tun.getFd();
+      final String yaml =
           "tunnel:\n"
               + "  mtu: 1280\n"
               + "  ipv4: 10.77.0.2\n"
@@ -152,62 +174,73 @@ public final class TunnelService extends VpnService {
               + "misc:\n"
               + "  task-stack-size: 65536\n"
               + "  connect-timeout: 15000\n"
-              + "  read-write-timeout: 180000\n"
+              + "  tcp-read-write-timeout: 180000\n"
+              + "  udp-read-write-timeout: 60000\n"
               + "  log-level: warn\n";
-      final int fd = tun.getFd();
       nativeThread =
           new Thread(
               () -> {
                 try {
                   int result = NativeTunnel.run(yaml, fd);
-                  if (!stopping) {
-                    state = "VPN adapter stopped (" + result + ")";
-                    stopSelf();
-                  }
+                  handler.post(
+                      () -> {
+                        if (!stopping)
+                          connectionFailed(
+                              "VPN adapter", new Exception("Stopped (" + result + ")"));
+                      });
                 } catch (Exception | LinkageError e) {
-                  connectionFailed("VPN adapter startup", e);
+                  handler.post(() -> connectionFailed("VPN adapter", e));
                 }
               },
               "multidns-tun");
-      state = "Connected";
       nativeThread.start();
+      state = "Connected";
       getSystemService(NotificationManager.class)
-          .notify(1, notification(this, "MultiDNS connected", 1));
+          .notify(1, notification(this, "MultiDNS · Connected", 1));
       handler.post(tick);
     } catch (Exception | LinkageError e) {
-      connectionFailed("VPN connection", e);
+      connectionFailed("VPN interface", e);
     }
   }
 
   private void connectionFailed(String stage, Throwable error) {
+    if (stopping) return;
     Log.e("MultiDNS", stage + " failed", error);
-    if (!stopping) state = "Connection failed: " + stage + ": " + error;
-    stopSelf();
+    state = "Connection failed: " + stage + ": " + error.getMessage();
+    shutdown();
   }
 
   private final Runnable tick =
       new Runnable() {
         public void run() {
-          if (engine != null && !stopping) {
-            stats = engine.stats();
-            handler.postDelayed(this, 1000);
-          }
+          final Engine current = engine;
+          if (current == null || stopping) return;
+          new Thread(
+                  () -> {
+                    String snapshot = current.stats();
+                    handler.post(
+                        () -> {
+                          if (!stopping) {
+                            stats = snapshot;
+                            handler.postDelayed(tick, 1000);
+                          }
+                        });
+                  },
+                  "multidns-stats")
+              .start();
         }
       };
 
   boolean protectFD(int fd) {
     try {
-      if (!protect(fd)) return false;
+      if (stopping || !protect(fd)) return false;
       Network n = network;
       if (n != null) {
-        ParcelFileDescriptor p = ParcelFileDescriptor.fromFd(fd);
-        try {
+        try (ParcelFileDescriptor p = ParcelFileDescriptor.fromFd(fd)) {
           n.bindSocket(p.getFileDescriptor());
-        } finally {
-          p.close();
         }
       }
-      return true;
+      return !stopping;
     } catch (Exception e) {
       return false;
     }
@@ -216,49 +249,74 @@ public final class TunnelService extends VpnService {
   @Override
   public void onRevoke() {
     state = "VPN permission revoked";
-    stopSelf();
+    shutdown();
+  }
+
+  static void disconnect(android.content.Context context) {
+    TunnelService current = instance;
+    if (current != null) current.handler.post(current::shutdown);
+    else context.stopService(new Intent(context, TunnelService.class));
+  }
+
+  private void shutdown() {
+    if (stopping) return;
+    stopping = true;
+    final boolean normal =
+        !state.startsWith("Connection failed") && !state.equals("VPN permission revoked");
+    if (normal) state = "Disconnecting";
+    handler.removeCallbacks(tick);
+    if (connectivity != null && callback != null) {
+      try {
+        connectivity.unregisterNetworkCallback(callback);
+      } catch (IllegalArgumentException ignored) {
+      }
+      callback = null;
+    }
+    // Release the VPN now; never put transport cleanup or a thread join in front of it.
+    if (nativeThread != null) {
+      try {
+        NativeTunnel.stop();
+      } catch (LinkageError e) {
+        Log.e("MultiDNS", "Adapter cleanup", e);
+      }
+    }
+    if (tun != null) {
+      try {
+        tun.close();
+      } catch (Exception ignored) {
+      }
+      tun = null;
+    }
+    stopForeground(STOP_FOREGROUND_REMOVE);
+    final Engine current = engine;
+    engine = null;
+    new Thread(
+            () -> {
+              if (current != null) current.stop();
+              if (nativeThread != null) {
+                try {
+                  nativeThread.join();
+                } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                }
+              }
+              handler.post(
+                  () -> {
+                    if (instance == this) {
+                      instance = null;
+                      stats = "{}";
+                      if (normal) state = "Disconnected";
+                    }
+                    stopSelf();
+                  });
+            },
+            "multidns-shutdown")
+        .start();
   }
 
   @Override
   public void onDestroy() {
-    stopping = true;
-    handler.removeCallbacks(tick);
-    if (connectivity != null && callback != null)
-      try {
-        connectivity.unregisterNetworkCallback(callback);
-      } catch (IllegalArgumentException e) {
-        Log.w("MultiDNS", "Network callback was already unregistered", e);
-      }
-    new Thread(
-            () -> {
-              if (engine != null) engine.stop();
-              if (nativeThread != null) {
-                try {
-                  NativeTunnel.stop();
-                } catch (LinkageError e) {
-                  Log.e("MultiDNS", "VPN adapter cleanup failed", e);
-                }
-                try {
-                  nativeThread.join(2000);
-                } catch (InterruptedException ignored) {
-                  Thread.currentThread().interrupt();
-                }
-              }
-              if (tun != null)
-                try {
-                  tun.close();
-                } catch (Exception ignored) {
-                }
-              if (instance == this) instance = null;
-              starting.set(false);
-              if ("Connected".equals(state)
-                  || "Connecting".equals(state)
-                  || "Disconnecting".equals(state)) state = "Disconnected";
-              stats = "{}";
-            },
-            "multidns-shutdown")
-        .start();
-    if ("Connected".equals(state) || "Connecting".equals(state)) state = "Disconnecting";
+    shutdown();
     super.onDestroy();
   }
 }

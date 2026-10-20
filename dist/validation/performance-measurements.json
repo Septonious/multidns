@@ -1,22 +1,99 @@
 {
-  "before": {
-    "upload": {
-      "seconds": 10.460978596,
-      "queries": 2548.0
+  "baseline": "62d8474 (0.1.2)",
+  "current": "0.2.0",
+  "payload_bytes": 73728,
+  "groups": 5,
+  "members_per_group": 2,
+  "base_window": 8,
+  "adaptive": true,
+  "delay_ms": 40,
+  "extra_delay_every_eighth_sequence_ms": 40,
+  "timeout_ms": 500,
+  "real_network": false,
+  "runs": {
+    "0.1.2": {
+      "upload": [
+        {
+          "seconds": 8.734453308,
+          "queries": 1724.0,
+          "retries": 10.0
+        },
+        {
+          "seconds": 6.734527169,
+          "queries": 1676.0,
+          "retries": 0.0
+        },
+        {
+          "seconds": 6.744821664,
+          "queries": 1676.0,
+          "retries": 0.0
+        }
+      ],
+      "download": [
+        {
+          "seconds": 1.02901302,
+          "queries": 211.0,
+          "retries": 0.0
+        },
+        {
+          "seconds": 1.029235733,
+          "queries": 211.0,
+          "retries": 0.0
+        },
+        {
+          "seconds": 1.032835767,
+          "queries": 211.0,
+          "retries": 0.0
+        }
+      ]
     },
-    "download": {
-      "seconds": 1.287287325,
-      "queries": 260.0
+    "0.2.0": {
+      "upload": [
+        {
+          "seconds": 2.355120817,
+          "queries": 1431.0,
+          "retries": 0.0
+        },
+        {
+          "seconds": 2.701902317,
+          "queries": 1415.0,
+          "retries": 0.0
+        },
+        {
+          "seconds": 2.302006397,
+          "queries": 1431.0,
+          "retries": 0.0
+        }
+      ],
+      "download": [
+        {
+          "seconds": 1.218527061,
+          "queries": 283.0,
+          "retries": 4.0
+        },
+        {
+          "seconds": 0.54784056,
+          "queries": 280.0,
+          "retries": 0.0
+        },
+        {
+          "seconds": 0.530276655,
+          "queries": 277.0,
+          "retries": 0.0
+        }
+      ]
     }
   },
-  "after": {
+  "medians": {
     "upload": {
-      "seconds": 7.437248132,
-      "queries": 1677.0
+      "before_seconds": 6.744821664,
+      "after_seconds": 2.355120817,
+      "relative_payload_rate": 2.8638962448608853
     },
     "download": {
-      "seconds": 1.048487368,
-      "queries": 212.0
+      "before_seconds": 1.029235733,
+      "after_seconds": 0.54784056,
+      "relative_payload_rate": 1.8787140057683933
     }
   }
 }

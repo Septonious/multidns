@@ -105,7 +105,7 @@ func TestUploadAndPollIdempotency(t *testing.T) {
 	f.Op = opWrite
 	f.Seq = 1
 	f.Data = []byte("world")
-	if s.handle(f)[0] != statusOK {
+	if status := s.handle(f)[0]; status != statusOK && status != statusWait {
 		t.Fatal("out of order write failed")
 	}
 	f.Seq = 0

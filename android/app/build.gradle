@@ -1,14 +1,21 @@
 plugins { id 'com.android.application' }
+def localConfig = new Properties()
+def localConfigFile = rootProject.file('local.properties')
+if (localConfigFile.exists()) localConfigFile.withInputStream { localConfig.load(it) }
+def retainedDebugKeystore = System.getenv('MULTIDNS_DEBUG_KEYSTORE') ?: localConfig.getProperty('multidns.debugKeystore')
 android {
  namespace 'org.multidns.app'
+ buildFeatures { buildConfig true }
+ signingConfigs { debug { if (retainedDebugKeystore) storeFile file(retainedDebugKeystore) } }
  compileSdk 35
  ndkVersion '28.0.13004108'
  defaultConfig {
   applicationId 'org.multidns.app'
+  testInstrumentationRunner 'org.multidns.app.SmokeInstrumentation'
   minSdk 24
   targetSdk 35
-  versionCode 3
-  versionName '0.1.2-prototype'
+  versionCode 4
+  versionName '0.2.0'
   ndk { abiFilters 'arm64-v8a', 'x86_64' }
   externalNativeBuild { ndkBuild { arguments "HEV_PATH=${rootProject.projectDir.parentFile}/build-deps/hev", 'APP_SUPPORT_FLEXIBLE_PAGE_SIZES=true' } }
  }

@@ -30,6 +30,12 @@ const (
 	maxStreams       = 1024
 )
 
+// Optional v1 extension negotiated in opOpen.Seq and its response payload.
+const (
+	opFlush        byte   = 8
+	queuedWriteACK uint32 = 1
+)
+
 var encoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 // Find the largest upload that fits the actual encoded QNAME, including label

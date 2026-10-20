@@ -22,6 +22,7 @@ func BenchmarkTunnelTransfer(b *testing.B) {
 		b.Run(direction, func(b *testing.B) {
 			p, server := testProfile(b)
 			p.TimeoutMS = 500
+			p.Adaptive = true
 			p.Groups = nil
 			for i := 0; i < 5; i++ {
 				group := Group{Name: fmt.Sprint(i)}

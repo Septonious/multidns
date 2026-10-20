@@ -1,15 +1,34 @@
 {
-  "go_race_tests": "passed, including sliding-window progress, delayed-reader backpressure, idle-read upload reservation, WAIT counters, EDNS bounds, UDP/TCP truncation, and prior integration tests",
+  "version": "0.2.0",
+  "android_version_code": 4,
+  "changes": [
+    "VPN release before asynchronous cleanup, terminal/cancelable engine startup",
+    "Native Android card UI and visual ordered routing rules",
+    "Scaling adaptive windows, bounded idle polling, control reservation",
+    "Negotiated selective upload ACKs with delivery barrier, asynchronous destination writes",
+    "Multiplexed TCP fallback, deadline-bounded DNS writes, socket generation checks"
+  ],
+  "go_race_tests": "passed: go test -race ./... -count=1 -timeout=120s",
   "go_vet": "passed",
-  "go_test_functions": 25,
-  "android": "0.1.2-prototype (versionCode 3); local build and lint passed; actual-phone throughput retest pending",
-  "github": "Source, matching binaries, APK, SHA256SUMS, and validation evidence included in the 0.1.2 update",
-  "public_recursive_throughput": "User verified authenticated probes and HTTPS transfers via 1.1.1.1 and 8.8.8.8 from the VPS; no throughput benchmark",
-  "restored_workspace_validation": "go test -race -count=1 ./... and go vet ./... passed; all seven artifact checksums verified",
-  "android_native_check": "arm64-v8a and x86_64 passed; incompatible HEV JNI_OnLoad absent; MultiDNS JNI exports present; original APK fails the regression check",
-  "android_signing": "Signature, unchanged signing certificate, versionCode 3, and 16 KB ZIP alignment verified",
-  "linux": "Rebuilt server, client, and scanner for Linux amd64 and arm64 from the 0.1.2 source",
-  "wire_compatibility": "Byte-verified 32 KiB HTTP upload/download passed: new client / old server, old client / new server, and new / new; previous binaries were from f4db08b",
-  "performance": "Three-run synthetic medians at window 8: 1.41x upload and 1.23x download payload rate versus bf6e726; not a real-network speed guarantee",
-  "android_apk_sha256": "5c06d40f584d48f6da5ab6e6d188c9a4d68fb960cb4acc4a0942cb19968e0913"
+  "android_build_and_lint": "passed; app and custom device-test APK assembled",
+  "android_native": "arm64-v8a and x86_64 JNI checks passed; all six libraries have >=16 KiB ELF LOAD alignment; APK ZIP alignment passed",
+  "android_signing": "same debug certificate as 0.1.2, explicitly selected with retained store",
+  "android_device_test": "not run: software emulators did not complete Android framework boot; no physical phone connected",
+  "wire_compatibility": "0.2.0 client / 0.1.2 server; 0.1.2 client / 0.2.0 server; 0.2.0 / 0.2.0: authenticated and byte-verified 32 KiB HTTP transfers passed",
+  "linux": "server/client/scanner rebuilt CGO-free for linux amd64 and arm64",
+  "performance": {
+    "upload": {
+      "before_seconds": 6.744821664,
+      "after_seconds": 2.355120817,
+      "relative_payload_rate": 2.8638962448608853
+    },
+    "download": {
+      "before_seconds": 1.029235733,
+      "after_seconds": 0.54784056,
+      "relative_payload_rate": 1.8787140057683933
+    }
+  },
+  "performance_limit": "synthetic 40 ms + periodic jitter; no promise of absolute public-resolver or phone throughput",
+  "loaded_rtt": "correlated-loss 86016-byte echo fixture: p50=42ms, p95=109ms, 110 concurrent probe samples",
+  "android_apk_sha256": "05d0a5e7b626d4d6b142a78f1d410af541629b5e1760a4a0ab632cf6bdfdd1aa"
 }

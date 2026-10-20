@@ -1,3 +1,46 @@
+# Version 0.2.0 — 20 October 2026
+
+Current authorized work: fix Disconnect, redesign the entire Android UI, optimize
+transport, and deliver an APK plus Linux binaries. This release implements those
+changes. Historical session-stop instructions below are superseded by this request.
+
+- Disconnect removes callbacks and closes TUN before asynchronous engine cleanup.
+  Startup is cancelable; a stopped engine cannot resurrect a VPN. The same path
+  handles the notification action and permission revocation. Stats/scan display
+  snapshots run outside the UI thread.
+- Native Android UI: warm neutral/teal cards, bottom navigation, one connection
+  control, live rates, expandable settings, and a visual ordered routing editor.
+- Transport: adaptive window scaling to 64; idle head-only polling; eight reserved
+  control slots; bounded destination writer outside stream mutex; 2 ms read
+  coalescing; negotiated selective queued ACKs with flush barrier; reused UDP/TCP
+  sockets; cancellation/deadline bounds; old-network dial generation checks.
+- Wire header stays v1. Supporting endpoints negotiate queued ACK bit 0 in Open
+  sequence/response and use operation 8 for delivery barriers. Old endpoints work.
+- APK: `dist/multidns-prototype-debug.apk`, version 0.2.0 / versionCode 4. Certificate
+  matches the previously installed 0.1.2 APK. All six Linux tools rebuilt CGO-free.
+- Retained signing key is outside Git. Direct Gradle builds select it through
+  `MULTIDNS_DEBUG_KEYSTORE` or ignored `android/local.properties` entry
+  `multidns.debugKeystore`. Do not fall back to another home directory's debug key.
+- Go race tests/vet, Android build/lint, both JNI ABIs, all six ELF LOAD alignments,
+  16 KiB APK ZIP alignment, signature/certificate and SHA-256 checks passed.
+- Byte-verified HTTP transfers pass new/old, old/new, and new/new client/server.
+- Final synthetic medians versus 62d8474: 2.86x upload, 1.88x download; adaptive
+  mode, base window 8, 5x2 endpoints, 40 ms + periodic jitter, 73,728-byte payload.
+  These are not public-resolver or Oppo performance claims.
+- Correlated-loss echo test verifies payload with loaded probe p50 42 ms / p95
+  109 ms. More detailed evidence and raw timings are in `dist/validation`.
+- Device runtime verification remains pending: API 35/28 software emulators did
+  not finish Android framework startup. A compiled custom device regression test
+  covers actual VPN transfer, repeated UI disconnect, startup cancel and screens.
+  No runtime APK test success is claimed. No physical phone was available.
+
+The user's production setup remains t.atmosl.ink delegated via ns2.atmosl.ink to
+136.148.220.253. Preserve `/etc/multidns/server.env` and the systemd public-IP listen
+drop-in. No production key or SSH access exists in this workspace. Updating the
+server binary and installing this signed APK as an update preserves configuration.
+
+Earlier notes below are historical.
+
 # Session handoff — 19 October 2026
 
 ## Throughput follow-up: version 0.1.2
