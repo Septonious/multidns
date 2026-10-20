@@ -91,9 +91,25 @@ func (c *Client) dataCapacity(op byte) int {
 			if h := c.health[addr]; h != nil && !h.Healthy {
 				continue
 			}
-			limit := c.pathLocked(addr).limit
+			path := c.pathLocked(addr)
+			limit := path.limit
+			settings := c.Profile.ResolverSettings[addr]
 			if op == opRead {
-				limit = max(1, limit-2)
+				if time.Now().Before(path.readRetryAt) {
+					continue
+				}
+				limit = min(max(1, limit-2), max(1, limit-(path.flight-path.reads)))
+				if c.activeUploads.Load() > 0 {
+					limit = min(limit, max(1, path.limit/2))
+				}
+				if settings.RXWorkers > 0 {
+					limit = min(limit, settings.RXWorkers)
+				}
+			} else {
+				limit = max(1, limit-path.reads)
+				if settings.TXWorkers > 0 {
+					limit = min(limit, settings.TXWorkers)
+				}
 			}
 			capacity += limit
 		}

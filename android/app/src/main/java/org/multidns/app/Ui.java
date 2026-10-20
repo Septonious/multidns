@@ -41,7 +41,7 @@ final class Ui {
     t.setTextSize(size);
     t.setTextColor(color);
     t.setTypeface(Typeface.create(bold ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
-    t.setLineSpacing(dp(c, 3), 1);
+    t.setLineSpacing(dp(c, 2), 1);
     t.setIncludeFontPadding(false);
     return t;
   }
@@ -49,14 +49,15 @@ final class Ui {
   static void styleButton(Button b, boolean primary) {
     Context c = b.getContext();
     b.setAllCaps(false);
+    b.setLetterSpacing(0);
     b.setTextSize(15);
     b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
     b.setTextColor(
         new ColorStateList(
             new int[][] {new int[] {-android.R.attr.state_enabled}, new int[] {}},
             new int[] {0xff657a74, primary ? ON_ACCENT : INK}));
-    b.setMinHeight(dp(c, 50));
-    b.setMinimumHeight(dp(c, 50));
+    b.setMinHeight(dp(c, 48));
+    b.setMinimumHeight(dp(c, 48));
     b.setMinWidth(0);
     b.setMinimumWidth(0);
     b.setPadding(dp(c, 16), dp(c, 10), dp(c, 16), dp(c, 10));
@@ -69,9 +70,9 @@ final class Ui {
     e.setTextColor(INK);
     e.setHintTextColor(MUTED);
     e.setTextSize(15);
-    e.setPadding(dp(c, 14), dp(c, 14), dp(c, 14), dp(c, 14));
-    e.setBackground(shape(c, SURFACE, 14, LINE));
-    e.setMinHeight(dp(c, 52));
+    e.setPadding(dp(c, 12), dp(c, 12), dp(c, 12), dp(c, 12));
+    e.setBackground(shape(c, SURFACE, 12, LINE));
+    e.setMinHeight(dp(c, 48));
     e.setSelectAllOnFocus(false);
   }
 
@@ -87,62 +88,9 @@ final class Ui {
 
   static void styleSpinner(Spinner s) {
     Context c = s.getContext();
-    s.setBackground(ripple(c, SURFACE, 14, LINE));
-    s.setPadding(dp(c, 8), dp(c, 4), dp(c, 8), dp(c, 4));
-    s.setMinimumHeight(dp(c, 52));
-  }
-
-  static final class Icon extends View {
-    private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final int kind;
-    private int color = ACCENT;
-
-    Icon(Context c, int kind) {
-      super(c);
-      this.kind = kind;
-      setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-    }
-
-    void color(int value) {
-      color = value;
-      invalidate();
-    }
-
-    @Override
-    protected void onDraw(Canvas canvas) {
-      super.onDraw(canvas);
-      canvas.save();
-      canvas.scale(getWidth() / 24f, getHeight() / 24f);
-      p.setColor(color);
-      p.setStyle(Paint.Style.STROKE);
-      p.setStrokeWidth(1.6f);
-      p.setStrokeCap(Paint.Cap.ROUND);
-      p.setStrokeJoin(Paint.Join.ROUND);
-      if (kind == 0) {
-        canvas.drawCircle(12, 12, 9, p);
-        canvas.drawLine(12, 5, 12, 12, p);
-        canvas.drawArc(7, 7, 17, 17, -45, 270, false, p);
-      } else if (kind == 1) {
-        canvas.drawRoundRect(3, 3, 21, 21, 5, 5, p);
-        canvas.drawLine(12, 7, 12, 17, p);
-        canvas.drawLine(7, 12, 17, 12, p);
-        canvas.drawCircle(12, 12, 3, p);
-      } else if (kind == 3) {
-        canvas.drawLine(4, 20, 4, 4, p);
-        canvas.drawLine(4, 20, 21, 20, p);
-        canvas.drawLine(8, 16, 8, 11, p);
-        canvas.drawLine(13, 16, 13, 6, p);
-        canvas.drawLine(18, 16, 18, 9, p);
-      } else {
-        canvas.drawLine(5, 6, 19, 6, p);
-        canvas.drawLine(5, 18, 19, 18, p);
-        canvas.drawLine(19, 6, 15, 2, p);
-        canvas.drawLine(19, 6, 15, 10, p);
-        canvas.drawLine(5, 18, 9, 14, p);
-        canvas.drawLine(5, 18, 9, 22, p);
-        canvas.drawLine(12, 6, 12, 18, p);
-      }
-      canvas.restore();
-    }
+    s.setBackgroundResource(R.drawable.bg_spinner);
+    s.setPadding(dp(c, 12), 0, dp(c, 36), 0);
+    s.setMinimumHeight(dp(c, 48));
+    s.setPopupBackgroundDrawable(shape(c, SURFACE, 12, LINE));
   }
 }

@@ -72,9 +72,10 @@ func downloadCapacity(p Profile) int {
 }
 
 type frame struct {
-	Bulk    bool // local scheduler hint; never serialized
-	Retry   bool // local diagnostic hint
-	XOR     bool // authenticated high bit in operation; no added bytes
+	wake    func() <-chan struct{} // local activity notification; never serialized
+	Bulk    bool                   // local scheduler hint; never serialized
+	Retry   bool                   // local diagnostic hint
+	XOR     bool                   // authenticated high bit in operation; no added bytes
 	Op      byte
 	Session uint64
 	Stream  uint32

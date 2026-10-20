@@ -1,0 +1,11 @@
+=== RUN   TestIdlePollingStaysBounded
+    stability_test.go:56: idle stream: 2 DNS queries per 500ms, window 32 with racing pair
+--- PASS: TestIdlePollingStaysBounded (2.04s)
+=== RUN   TestIdlePollingStaysBounded
+    stability_test.go:56: idle stream: 2 DNS queries per 500ms, window 32 with racing pair
+--- PASS: TestIdlePollingStaysBounded (2.86s)
+=== RUN   TestIdlePollingStaysBounded
+    stability_test.go:56: idle stream: 2 DNS queries per 500ms, window 32 with racing pair
+--- PASS: TestIdlePollingStaysBounded (1.63s)
+PASS
+ok  	github.com/Septonious/multidns/core	7.578s

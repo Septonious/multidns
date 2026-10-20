@@ -109,3 +109,20 @@ The test checks a byte-verified 16 KiB transfer through the VPN, three actual UI
 Connect/Disconnect cycles, disappearance of the VPN network, cancellation during
 automatic discovery, and captures each redesigned screen. Screenshots are saved
 under the target app's external files directory in `smoke-screenshots`.
+
+## Version 0.3.2 layout checks
+
+The connection screen hides empty rate/counter placeholders while disconnected.
+Navigation uses text labels; expandable sections use standard vector chevrons.
+Cards, buttons, fields and dropdowns use consistent spacing. Routing menus use a
+text Options action rather than a font-dependent glyph. Parameter-test cancel
+and report actions appear only when relevant; per-resolver limits are expandable.
+
+Headless Robolectric 4.14.1 native graphics rendered Connection, connected-state
+fixture, Scan, Routing, Diagnostics and server editor at 360dp. The 320dp check
+uses 1.3x font scale and verifies navigation labels are not ellipsized and touch
+targets remain at least 48dp. Fixtures shadow the Go binding and use documentation
+IP addresses and a test key. They verify native layout, not VPN service lifecycle,
+physical Oppo rendering or real network performance. Images and logs are in
+`dist/validation/ui/`; the existing device-only smoke instrumentation remains the
+appropriate runtime VPN/connect/disconnect check when a device is available.

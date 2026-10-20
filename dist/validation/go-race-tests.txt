@@ -1,5 +1,5 @@
 ?   	github.com/Septonious/multidns/cmd/client	[no test files]
 ?   	github.com/Septonious/multidns/cmd/scanner	[no test files]
 ?   	github.com/Septonious/multidns/cmd/server	[no test files]
-ok  	github.com/Septonious/multidns/core	46.042s
-ok  	github.com/Septonious/multidns/mobile	1.786s
+ok  	github.com/Septonious/multidns/core	52.936s
+ok  	github.com/Septonious/multidns/mobile	3.657s

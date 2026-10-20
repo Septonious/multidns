@@ -1,0 +1,10 @@
+=== RUN   TestAdmissionSharesCreditsBetweenFlows
+--- PASS: TestAdmissionSharesCreditsBetweenFlows (0.00s)
+=== RUN   TestWindowsSharePoolInsteadOfMultiplyingIt
+--- PASS: TestWindowsSharePoolInsteadOfMultiplyingIt (0.00s)
+=== RUN   TestFailedDownloadFallbackDoesNotDisableUploadOrReviveOnProbe
+--- PASS: TestFailedDownloadFallbackDoesNotDisableUploadOrReviveOnProbe (0.00s)
+=== RUN   TestControlEscapesDeadIndependentGroup
+--- PASS: TestControlEscapesDeadIndependentGroup (0.00s)
+PASS
+ok  	github.com/Septonious/multidns/core	0.036s

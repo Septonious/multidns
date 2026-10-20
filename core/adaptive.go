@@ -13,6 +13,9 @@ import (
 )
 
 type ResolverHealth struct {
+	TCPFallbackFailures uint64 `json:"tcp_fallback_failures"`
+	ReadCooldownMS      int64  `json:"read_cooldown_ms"`
+
 	CapacityLossCuts   int `json:"capacity_loss_cuts"`
 	CapacityDelayCuts  int `json:"capacity_delay_cuts"`
 	CapacityRecoveries int `json:"capacity_recoveries"`
@@ -103,6 +106,7 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 		copy.TXWorkers = settings.TXWorkers
 		copy.RXWorkers = settings.RXWorkers
 		if p := c.paths[h.Endpoint]; p != nil {
+			copy.ReadCooldownMS = max(int64(0), time.Until(p.readRetryAt).Milliseconds())
 			copy.Capacity = p.limit
 			copy.CapacityLossCuts = p.lossCuts
 			copy.CapacityDelayCuts = p.delayCuts

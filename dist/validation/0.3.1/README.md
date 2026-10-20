@@ -1,0 +1,1 @@
+Current evidence: 0.3.1 client regression repair. Historical evidence lives in 0.3.0, 0.2.2, 0.2.1 and 0.2.0. Three isolated regressions fail on 0.3.0 and pass after repair. The broader old-version mixed HTTPS fixture also passed one run; it is not a complete reproduction of the phone failure. See docs/PERFORMANCE.md. SHA256SUMS covers all seven distributed APK/Linux artifacts.

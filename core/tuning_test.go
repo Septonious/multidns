@@ -186,7 +186,7 @@ func TestIndependentResolverFailureRedistributesAndRecovers(t *testing.T) {
 			recovered = h.Healthy && h.Recoveries > 0 && h.Timeouts > 0
 		}
 	}
-	if c.Stats().Hedges != 0 {
+	if c.Stats().DataHedges != 0 {
 		t.Fatal("one-resolver groups duplicated work after global admission")
 	}
 	if !recovered || c.Stats().Retries == 0 {

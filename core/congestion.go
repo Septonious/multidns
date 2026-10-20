@@ -11,6 +11,8 @@ import (
 // prevent ten busy streams from flooding the same recursive resolver.
 // Admission happens before global slots and before starting an exchange timer.
 type pathState struct {
+	readRetryAt                     time.Time
+	readFailures                    int
 	lossCuts, delayCuts, recoveries int
 	txRTT, txVariance               float64
 	delaySamples                    int

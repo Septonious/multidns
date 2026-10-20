@@ -23,7 +23,7 @@ public final class MainActivity extends Activity {
   private TextView downValue, upValue, healthValue, trafficValue;
   private Button connectButton;
   private final ArrayList<TextView> navLabels = new ArrayList<>();
-  private final ArrayList<Ui.Icon> navIcons = new ArrayList<>();
+  private LinearLayout rateSection;
   private final ArrayList<LinearLayout> navItems = new ArrayList<>();
   private int currentTab;
   private TextView diagnosticsSummary, tuningOutput;
@@ -32,7 +32,7 @@ public final class MainActivity extends Activity {
   private volatile mobile.Engine tuningEngine;
   private volatile boolean tuningRunning;
   private String tuningReport, tuningProfile;
-  private Button applyTuning;
+  private Button applyTuning, findTuning, cancelTuning, tuningDetails, copyTuning;
 
   private boolean editing;
   private TextView dashboard, scanStatus, scanResults;
@@ -143,11 +143,9 @@ public final class MainActivity extends Activity {
                   | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
     LinearLayout brand = new LinearLayout(this);
     brand.setGravity(Gravity.CENTER_VERTICAL);
-    brand.setPadding(dp(24), dp(18), dp(24), dp(12));
-    Ui.Icon mark = new Ui.Icon(this, 0);
-    brand.addView(mark, new LinearLayout.LayoutParams(dp(26), dp(26)));
+    brand.setPadding(dp(20), dp(16), dp(20), dp(8));
     TextView word = Ui.label(this, "MultiDNS", 22, Ui.INK, true);
-    word.setPadding(dp(10), 0, 0, 0);
+
     brand.addView(word, new LinearLayout.LayoutParams(0, -2, 1));
     TextView version = Ui.label(this, BuildConfig.VERSION_NAME, 12, Ui.MUTED, false);
     version.setContentDescription("Version " + BuildConfig.VERSION_NAME);
@@ -158,24 +156,24 @@ public final class MainActivity extends Activity {
     scroll.setClipToPadding(false);
     page = new LinearLayout(this);
     page.setOrientation(LinearLayout.VERTICAL);
-    page.setPadding(dp(24), dp(12), dp(24), dp(24));
+    page.setPadding(dp(20), dp(12), dp(20), dp(20));
     scroll.addView(page);
     root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     LinearLayout nav = new LinearLayout(this);
     nav.setBackground(Ui.shape(this, Ui.SURFACE, 24, Ui.LINE));
-    nav.setPadding(dp(8), dp(8), dp(8), dp(8));
-    String[] names = {"Connect", "Scanner", "Routing", "Diagnostics"};
+    nav.setPadding(dp(4), dp(4), dp(4), dp(4));
+    String[] names = {"Connect", "Scan", "Routing", "Diagnostics"};
     for (int i = 0; i < names.length; i++) {
       final int tab = i;
       LinearLayout item = new LinearLayout(this);
       item.setOrientation(LinearLayout.VERTICAL);
       item.setGravity(Gravity.CENTER);
-      item.setPadding(dp(4), dp(8), dp(4), dp(8));
+      item.setPadding(dp(6), 0, dp(6), 0);
+      item.setMinimumHeight(dp(48));
       item.setBackground(Ui.ripple(this, Ui.SURFACE, 18, 0));
-      Ui.Icon icon = new Ui.Icon(this, i);
-      item.addView(icon, new LinearLayout.LayoutParams(dp(23), dp(23)));
       TextView label = Ui.label(this, names[i], 12, Ui.MUTED, true);
-      label.setPadding(0, dp(5), 0, 0);
+      label.setMaxLines(1);
+      label.setEllipsize(android.text.TextUtils.TruncateAt.END);
       item.addView(label);
       item.setContentDescription(names[i]);
       item.setFocusable(true);
@@ -186,12 +184,12 @@ public final class MainActivity extends Activity {
             else if (tab == 2) routing();
             else diagnostics();
           });
-      nav.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
+      nav.addView(item, new LinearLayout.LayoutParams(0, -1, Math.max(8, names[i].length() + 4)));
       navLabels.add(label);
-      navIcons.add(icon);
+
       navItems.add(item);
     }
-    LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, dp(76));
+    LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-1, dp(56));
     np.setMargins(dp(16), 0, dp(16), dp(8));
     root.addView(nav, np);
     setContentView(root);
@@ -204,41 +202,55 @@ public final class MainActivity extends Activity {
       navItems.get(i).setBackground(Ui.ripple(this, i == tab ? Ui.SOFT : Ui.SURFACE, 18, 0));
       navItems.get(i).setSelected(i == tab);
       navLabels.get(i).setTextColor(i == tab ? Ui.ACCENT : Ui.MUTED);
-      navIcons.get(i).color(i == tab ? Ui.ACCENT : Ui.MUTED);
     }
   }
 
   private void heading(String title, String subtitle) {
-    TextView h = Ui.label(this, title, 30, Ui.INK, true);
+    TextView h = Ui.label(this, title, 26, Ui.INK, true);
+    h.setPadding(0, 0, 0, dp(16));
     page.addView(h);
-    TextView sub = text(page, subtitle);
-    sub.setTextColor(Ui.MUTED);
-    sub.setPadding(0, dp(8), 0, dp(18));
+    if (!subtitle.isEmpty()) {
+      TextView sub = text(page, subtitle);
+      sub.setTextColor(Ui.MUTED);
+      sub.setPadding(0, 0, 0, dp(16));
+    }
   }
 
   private LinearLayout card(LinearLayout parent) {
     LinearLayout box = new LinearLayout(this);
     box.setOrientation(LinearLayout.VERTICAL);
-    box.setPadding(dp(20), dp(20), dp(20), dp(20));
-    box.setBackground(Ui.shape(this, Ui.SURFACE, 22, Ui.LINE));
+    box.setPadding(dp(16), dp(16), dp(16), dp(16));
+    box.setBackground(Ui.shape(this, Ui.SURFACE, 16, Ui.LINE));
     LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
-    p.setMargins(0, 0, 0, dp(16));
+    p.setMargins(0, 0, 0, dp(12));
     parent.addView(box, p);
     return box;
   }
 
   private LinearLayout section(LinearLayout parent, String title, String subtitle) {
     LinearLayout box = card(parent);
-    TextView name = Ui.label(this, title, 19, Ui.INK, true);
+    TextView name = Ui.label(this, title, 17, Ui.INK, true);
+    name.setPadding(0, 0, 0, dp(8));
     box.addView(name);
     if (!subtitle.isEmpty()) text(box, subtitle).setTextColor(Ui.MUTED);
     return box;
   }
 
   private LinearLayout fold(LinearLayout parent, String title, String subtitle) {
-    LinearLayout outer = card(parent);
-    TextView toggle = Ui.label(this, title + "  +", 17, Ui.INK, true);
+    LinearLayout outer;
+    if (parent == page) {
+      outer = card(parent);
+    } else {
+      outer = new LinearLayout(this);
+      outer.setOrientation(LinearLayout.VERTICAL);
+      LinearLayout.LayoutParams margins = new LinearLayout.LayoutParams(-1, -2);
+      margins.setMargins(0, dp(4), 0, dp(4));
+      parent.addView(outer, margins);
+    }
+    TextView toggle = Ui.label(this, title, 16, Ui.INK, true);
     toggle.setPadding(0, dp(8), 0, dp(8));
+    toggle.setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, R.drawable.ic_expand_more, 0);
+    toggle.setCompoundDrawablePadding(dp(12));
     toggle.setMinHeight(dp(48));
     toggle.setGravity(Gravity.CENTER_VERTICAL);
     outer.addView(toggle);
@@ -251,7 +263,8 @@ public final class MainActivity extends Activity {
         v -> {
           boolean open = content.getVisibility() != View.VISIBLE;
           content.setVisibility(open ? View.VISIBLE : View.GONE);
-          toggle.setText(title + (open ? "  −" : "  +"));
+          toggle.setCompoundDrawablesRelativeWithIntrinsicBounds(
+              0, 0, open ? R.drawable.ic_expand_less : R.drawable.ic_expand_more, 0);
           toggle.setContentDescription(title + (open ? ", expanded" : ", collapsed"));
         });
     return content;
@@ -275,6 +288,7 @@ public final class MainActivity extends Activity {
     resolverViews.clear();
     tuningOutput = null;
     applyTuning = null;
+    findTuning = cancelTuning = tuningDetails = copyTuning = null;
     page.removeAllViews();
     scroll.scrollTo(0, 0);
     dashboard = null;
@@ -286,6 +300,7 @@ public final class MainActivity extends Activity {
     scanStatus = null;
     scanResults = null;
     latencyResults = null;
+    rateSection = null;
     statsAt = 0;
   }
 
@@ -318,10 +333,14 @@ public final class MainActivity extends Activity {
         statsAt = 0;
         if (downValue != null) downValue.setText("0.00");
         if (upValue != null) upValue.setText("0.00");
-        if (healthValue != null) healthValue.setText("Ready when you are");
-        if (trafficValue != null) trafficValue.setText("Your connection activity appears here.");
+        if (healthValue != null) healthValue.setVisibility(View.GONE);
+        if (rateSection != null) rateSection.setVisibility(View.GONE);
+        if (trafficValue != null) trafficValue.setVisibility(View.GONE);
         return "";
       }
+      if (rateSection != null) rateSection.setVisibility(View.VISIBLE);
+      if (healthValue != null) healthValue.setVisibility(View.VISIBLE);
+      if (trafficValue != null) trafficValue.setVisibility(View.VISIBLE);
       long now = SystemClock.elapsedRealtime();
       long up = stats.optLong("uploaded"), down = stats.optLong("downloaded");
       double uploadRate = 0, downloadRate = 0;
@@ -344,14 +363,14 @@ public final class MainActivity extends Activity {
             healthy
                 + "/"
                 + (resolvers == null ? 0 : resolvers.length())
-                + " resolvers ready  ·  "
+                + " resolvers reachable  ·  "
                 + (groups == null ? 0 : groups.length())
                 + " groups");
       if (trafficValue != null)
         trafficValue.setText(
             String.format(
                 Locale.US,
-                "↓ %.1f MB received   ·   ↑ %.1f MB sent\n"
+                "Downloaded %.1f MB  ·  Uploaded %.1f MB\n"
                     + "%d active streams   ·   %d retries (%.1f%%)\n"
                     + "%d timeouts   ·   %d DNS errors",
                 down / 1000000.0,
@@ -369,7 +388,7 @@ public final class MainActivity extends Activity {
 
   private TextView text(LinearLayout parent, String content) {
     TextView t = Ui.label(this, content, 14, Ui.INK, false);
-    t.setPadding(0, dp(8), 0, dp(8));
+    t.setPadding(0, dp(4), 0, dp(4));
     parent.addView(t, new LinearLayout.LayoutParams(-1, -2));
     return t;
   }
@@ -387,7 +406,7 @@ public final class MainActivity extends Activity {
           }
         });
     LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
-    p.setMargins(0, dp(6), 0, dp(6));
+    p.setMargins(0, dp(4), 0, dp(4));
     parent.addView(b, p);
     return b;
   }
@@ -396,6 +415,7 @@ public final class MainActivity extends Activity {
     TextView caption = text(parent, label);
     caption.setTextColor(Ui.MUTED);
     caption.setTextSize(13);
+    caption.setPadding(0, dp(8), 0, dp(6));
     EditText e = new EditText(this);
     e.setText(value);
     e.setSingleLine(!multiline);
@@ -430,12 +450,8 @@ public final class MainActivity extends Activity {
   private void servers() {
     clear();
     selectTab(0);
-    heading("Your connection", "A quieter path to the internet.");
+    heading("Connection", "");
     LinearLayout hero = card(page);
-    TextView eyebrow = text(hero, "CONNECTION");
-    eyebrow.setTextSize(11);
-    eyebrow.setLetterSpacing(.12f);
-    eyebrow.setTextColor(Ui.MUTED);
     dashboard = Ui.label(this, TunnelService.state, 23, Ui.INK, true);
     hero.addView(dashboard);
     if (profile() != null)
@@ -463,11 +479,13 @@ public final class MainActivity extends Activity {
               updateDashboard();
             });
     LinearLayout rates = new LinearLayout(this);
+    rateSection = rates;
+    rates.setPadding(0, dp(16), 0, dp(12));
     LinearLayout left = new LinearLayout(this), right = new LinearLayout(this);
     left.setOrientation(LinearLayout.VERTICAL);
     right.setOrientation(LinearLayout.VERTICAL);
-    text(left, "↓  Download").setTextColor(Ui.MUTED);
-    text(right, "↑  Upload").setTextColor(Ui.MUTED);
+    text(left, "Download").setTextColor(Ui.MUTED);
+    text(right, "Upload").setTextColor(Ui.MUTED);
     downValue = Ui.label(this, "0.00", 30, Ui.INK, true);
     upValue = Ui.label(this, "0.00", 30, Ui.INK, true);
     left.addView(downValue);
@@ -477,12 +495,12 @@ public final class MainActivity extends Activity {
     rates.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
     rates.addView(right, new LinearLayout.LayoutParams(0, -2, 1));
     hero.addView(rates);
-    healthValue = text(hero, "Ready when you are");
+    healthValue = text(hero, "");
     healthValue.setTextColor(Ui.ACCENT);
-    trafficValue = text(hero, "Your connection activity appears here.");
+    trafficValue = text(hero, "");
     trafficValue.setTextColor(Ui.MUTED);
     trafficValue.setTextSize(12);
-    LinearLayout saved = section(page, "Servers", "Choose a profile for your next connection.");
+    LinearLayout saved = section(page, "Servers", "");
     for (int i = 0; i < profiles.length(); i++) {
       final int index = i;
       JSONObject p = profiles.optJSONObject(i);
@@ -491,13 +509,8 @@ public final class MainActivity extends Activity {
       row.setPadding(dp(16), dp(14), dp(16), dp(14));
       row.setBackground(
           Ui.ripple(this, i == selected ? Ui.SOFT : Ui.SURFACE, 14, i == selected ? 0 : Ui.LINE));
-      TextView name =
-          Ui.label(
-              this,
-              (i == selected ? "●  " : "○  ") + p.optString("name", "Server"),
-              16,
-              Ui.INK,
-              true);
+      TextView name = Ui.label(this, p.optString("name", "Server"), 16, Ui.INK, true);
+      name.setTextColor(i == selected ? Ui.ACCENT : Ui.INK);
       row.addView(name);
       text(row, p.optString("domain")).setTextColor(Ui.MUTED);
       row.setOnClickListener(
@@ -544,9 +557,6 @@ public final class MainActivity extends Activity {
             menu.show();
           });
     }
-    TextView privacy = text(page, "Profiles and server keys are encrypted on this device.");
-    privacy.setTextColor(Ui.MUTED);
-    privacy.setTextSize(12);
     updateDashboard();
   }
 
@@ -625,8 +635,8 @@ public final class MainActivity extends Activity {
     clear();
     selectTab(0);
     editing = true;
-    heading(index >= 0 ? "Edit server" : "Add server", "Your server, your paths.");
-    LinearLayout identity = section(page, "Server", "Connection details");
+    heading(index >= 0 ? "Edit server" : "Add server", "");
+    LinearLayout identity = section(page, "Server", "");
     JSONObject original = index >= 0 ? profiles.optJSONObject(index) : empty();
     EditText name = field(identity, "Server name", original.optString("name"), false),
         domain = field(identity, "Delegated tunnel domain", original.optString("domain"), false),
@@ -634,12 +644,8 @@ public final class MainActivity extends Activity {
         key = field(identity, "Server authentication key", original.optString("key"), false);
     key.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
     LinearLayout paths =
-        section(
-            page,
-            "Resolver groups",
-            "Healthy resolvers share independent work. Failed paths are bypassed automatically.");
-    text(paths, "One group per line. Separate members with commas. Up to 100 resolvers.")
-        .setTextColor(Ui.MUTED);
+        section(page, "Resolver groups", "All resolvers carry data. Groups define data backups.");
+    text(paths, "One group per line; separate members with commas.").setTextColor(Ui.MUTED);
     StringBuilder groups = new StringBuilder();
     JSONArray gs = original.optJSONArray("groups");
     for (int i = 0; gs != null && i < gs.length(); i++) {
@@ -678,8 +684,7 @@ public final class MainActivity extends Activity {
             error(e.getMessage());
           }
         });
-    LinearLayout tuning =
-        fold(page, "Transport settings", "Automatic tuning keeps short requests responsive.");
+    LinearLayout tuning = fold(page, "Transport settings", "");
     CheckBox adaptive = new CheckBox(this);
     adaptive.setText("Adapt paths: low RTT for short requests, throughput for bulk");
     adaptive.setChecked(original.optBoolean("adaptive", true));
@@ -876,11 +881,11 @@ public final class MainActivity extends Activity {
           if (h.has("healthy"))
             measured =
                 h.optBoolean("healthy")
-                    ? String.format(java.util.Locale.ROOT, " · %.1f ms", h.optDouble("rtt_ms"))
+                    ? String.format(java.util.Locale.ROOT, " · %.1f ms", h.optDouble("rtt_ms", 0))
                     : " · not working";
         } catch (Exception ignored) {
         }
-        TextView card = text(box, resolver + measured + "  ⋮⋮");
+        TextView card = text(box, resolver + measured);
         card.setBackground(Ui.ripple(this, Ui.SURFACE, 10, Ui.LINE));
         card.setPadding(dp(12), dp(12), dp(12), dp(12));
         card.setOnLongClickListener(
@@ -928,12 +933,8 @@ public final class MainActivity extends Activity {
   private void diagnostics() {
     clear();
     selectTab(3);
-    heading("Diagnostics", "Understand each path. Measure before tuning.");
-    LinearLayout summary =
-        section(
-            page,
-            "Live transport",
-            "Counters reset on connection. Byte totals count accepted payloads.");
+    heading("Diagnostics", "");
+    LinearLayout summary = section(page, "Live transport", "Counters reset on connection.");
     diagnosticsSummary = text(summary, "");
     diagnosticsSummary.setTextIsSelectable(true);
     button(summary, "Copy diagnostics", () -> copyDebug(TunnelService.stats));
@@ -941,42 +942,39 @@ public final class MainActivity extends Activity {
         section(
             page,
             "Parameter discovery",
-            "Tests full-size authenticated TXT replies, upload payloads and TX/RX concurrency."
-                + " Recommendations favor throughput within your latency budget; results vary with"
-                + " network conditions.");
-    button(tune, "Find optimal parameters", this::startParameterTest);
-    button(
-        tune,
-        "Cancel parameter test",
-        () -> {
-          mobile.Engine e = tuningEngine;
-          if (e != null) e.cancelParameterTest();
-        });
+            "Measure payload size and concurrency on this network. Disconnect the VPN first.");
+    findTuning = button(tune, "Find optimal parameters", this::startParameterTest);
+    cancelTuning =
+        button(
+            tune,
+            "Cancel parameter test",
+            () -> {
+              mobile.Engine e = tuningEngine;
+              if (e != null) e.cancelParameterTest();
+            });
     tuningOutput =
         text(
             tune,
             tuningRunning
                 ? "Tests running…"
                 : (tuningReport == null
-                    ? "Ready. Update the server before testing."
+                    ? "Requires server 0.3.0 or later."
                     : formatTuning(tuningReport)));
     tuningOutput.setTextIsSelectable(true);
     applyTuning = button(tune, "Apply found parameters to resolvers", this::applyParameters);
     applyTuning.setVisibility(canApplyTuning() ? View.VISIBLE : View.GONE);
-    button(tune, "View parameter test details", this::showTuningDetails);
-    button(
-        tune,
-        "Copy parameter test report",
-        () -> {
-          if (tuningReport != null) copyDebug(tuningReport);
-        });
+    tuningDetails = button(tune, "View test details", this::showTuningDetails);
+    copyTuning =
+        button(
+            tune,
+            "Copy parameter test report",
+            () -> {
+              if (tuningReport != null) copyDebug(tuningReport);
+            });
+    updateTuningActions();
     if (profile() != null) {
       LinearLayout settings =
-          section(
-              page,
-              "Settings",
-              "Per-profile limits for adaptive mode. Reconnect to activate saved changes. TX/RX"
-                  + " workers limit concurrent DNS exchanges across all streams; 0 = automatic.");
+          fold(page, "Resolver settings", "Reconnect after saving changes. 0 = automatic.");
       button(settings, "Connection and transport settings", () -> edit(selected));
       JSONObject stored = profile().optJSONObject("resolver_settings");
       for (String endpoint : profileEndpoints()) {
@@ -1018,6 +1016,16 @@ public final class MainActivity extends Activity {
             "Queue delay includes local admission; RTT measures DNS exchanges. Retransmissions"
                 + " count ARQ reissues on this path; backups are separate hedges.");
     updateDiagnostics();
+  }
+
+  private void updateTuningActions() {
+    if (findTuning != null) findTuning.setEnabled(!tuningRunning);
+    if (cancelTuning != null) cancelTuning.setVisibility(tuningRunning ? View.VISIBLE : View.GONE);
+    if (tuningDetails != null)
+      tuningDetails.setVisibility(
+          tuningReport != null && !tuningRunning ? View.VISIBLE : View.GONE);
+    if (copyTuning != null)
+      copyTuning.setVisibility(tuningReport != null && !tuningRunning ? View.VISIBLE : View.GONE);
   }
 
   private void toast(String message) {
@@ -1063,7 +1071,8 @@ public final class MainActivity extends Activity {
         "Resolver attempts",
         "Replies",
         "ARQ retries",
-        "Backup attempts",
+        "Data backups",
+        "Control backups",
         "Timeouts",
         "DNS errors",
         "Invalid replies",
@@ -1077,7 +1086,8 @@ public final class MainActivity extends Activity {
         "queries",
         "replies",
         "retries",
-        "hedges",
+        "data_hedges",
+        "control_hedges",
         "timeouts",
         "dns_errors",
         "invalid_replies",
@@ -1087,13 +1097,14 @@ public final class MainActivity extends Activity {
         "streams",
         "admission_queued"
       };
-      for (int i = 0; i < keys.length; i++)
+      for (int i = 0; stats.has("queries") && i < keys.length; i++)
         total.append(labels[i]).append(": ").append(stats.optLong(keys[i])).append("\n");
-      total.append(
-          String.format(
-              Locale.ROOT,
-              "Oldest queued request: %.1f ms\n",
-              stats.optDouble("oldest_admission_ms")));
+      if (stats.has("queries"))
+        total.append(
+            String.format(
+                Locale.ROOT,
+                "Oldest queued request: %.1f ms\n",
+                stats.optDouble("oldest_admission_ms", 0)));
       diagnosticsSummary.setText(total.toString());
       JSONArray resolvers = stats.optJSONArray("resolvers");
       for (int i = 0; resolvers != null && i < resolvers.length(); i++) {
@@ -1101,8 +1112,7 @@ public final class MainActivity extends Activity {
         String endpoint = r.getString("endpoint");
         TextView view = resolverViews.get(endpoint);
         if (view == null) {
-          LinearLayout box =
-              fold(diagnosticsPaths, endpoint, "Live counters and queue measurements");
+          LinearLayout box = fold(diagnosticsPaths, endpoint, "");
           view = text(box, "");
           view.setTextIsSelectable(true);
           resolverViews.put(endpoint, view);
@@ -1114,11 +1124,11 @@ public final class MainActivity extends Activity {
             String.format(
                 Locale.ROOT,
                 "\nRTT %.1f ms · min %.1f · variance %.1f\nQueue %.1f ms · peak %.1f",
-                r.optDouble("rtt_ms"),
-                r.optDouble("min_rtt_ms"),
-                r.optDouble("rtt_variance_ms"),
-                r.optDouble("queue_ms"),
-                r.optDouble("max_queue_ms")));
+                r.optDouble("rtt_ms", 0),
+                r.optDouble("min_rtt_ms", 0),
+                r.optDouble("rtt_variance_ms", 0),
+                r.optDouble("queue_ms", 0),
+                r.optDouble("max_queue_ms", 0)));
         String[] names = {
           "Capacity",
           "Capacity cuts from loss",
@@ -1138,6 +1148,8 @@ public final class MainActivity extends Activity {
           "Reconnections",
           "Recoveries",
           "TCP fallbacks",
+          "Failed TCP fallbacks",
+          "Download cooldown (ms)",
           "Uploaded bytes",
           "Downloaded bytes",
           "DNS MTU",
@@ -1163,6 +1175,8 @@ public final class MainActivity extends Activity {
           "reconnections",
           "recoveries",
           "tcp_fallbacks",
+          "tcp_fallback_failures",
+          "read_cooldown_ms",
           "uploaded",
           "downloaded",
           "mtu",
@@ -1310,8 +1324,8 @@ public final class MainActivity extends Activity {
                   trial.optInt("workers"),
                   trial.optInt("received"),
                   trial.optInt("sent"),
-                  trial.optDouble("p95_ms"),
-                  trial.optDouble("bytes_per_second") / 1024));
+                  trial.optDouble("p95_ms", 0),
+                  trial.optDouble("bytes_per_second", 0) / 1024));
         }
       }
       ScrollView scroller = new ScrollView(this);
@@ -1351,6 +1365,7 @@ public final class MainActivity extends Activity {
     tuningRunning = true;
     tuningReport = null;
     tuningProfile = profile().toString();
+    updateTuningActions();
     tuningEngine = Mobile.newEngine();
     final String config = tuningProfile;
     final mobile.Engine engine = tuningEngine;
@@ -1378,6 +1393,7 @@ public final class MainActivity extends Activity {
                     () -> {
                       tuningReport = report;
                       if (tuningOutput != null) tuningOutput.setText(formatTuning(report));
+                      updateTuningActions();
                       if (applyTuning != null)
                         applyTuning.setVisibility(canApplyTuning() ? View.VISIBLE : View.GONE);
                     });
@@ -1388,6 +1404,7 @@ public final class MainActivity extends Activity {
                 tuningEngine = null;
                 handler.post(
                     () -> {
+                      updateTuningActions();
                       if (applyTuning != null)
                         applyTuning.setVisibility(canApplyTuning() ? View.VISIBLE : View.GONE);
                     });
@@ -1464,7 +1481,7 @@ public final class MainActivity extends Activity {
                                 + "  "
                                 + (r.optBoolean("healthy")
                                     ? String.format(
-                                        java.util.Locale.ROOT, "%.1f ms", r.optDouble("rtt_ms"))
+                                        java.util.Locale.ROOT, "%.1f ms", r.optDouble("rtt_ms", 0))
                                     : "not working")
                                 + "\n";
                         runOnUiThread(() -> output.append(line));
@@ -1486,7 +1503,7 @@ public final class MainActivity extends Activity {
   private void routing() {
     clear();
     selectTab(2);
-    heading("Routing", "Decide what takes the tunnel.");
+    heading("Routing", "");
     if (profile() == null) {
       text(page, "Add a server first.");
       return;
@@ -1559,8 +1576,7 @@ public final class MainActivity extends Activity {
             "Additional package IDs, one per line (for apps without launcher icons)",
             "",
             true);
-    LinearLayout rulesCard =
-        section(page, "Destination rules", "First match wins. Reconnect to apply your changes.");
+    LinearLayout rulesCard = section(page, "Destination rules", "First match wins.");
     String[] actions = {"tunnel", "direct", "block"};
     Spinner fallback = new Spinner(this);
     fallback.setAdapter(
@@ -1605,8 +1621,7 @@ public final class MainActivity extends Activity {
 
   private void renderRules(LinearLayout list, ArrayList<JSONObject> rules) {
     list.removeAllViews();
-    if (rules.isEmpty())
-      text(list, "No rules yet. All traffic uses the default action.").setTextColor(Ui.MUTED);
+    if (rules.isEmpty()) text(list, "No rules. The default action applies.").setTextColor(Ui.MUTED);
     for (int i = 0; i < rules.size(); i++) {
       final int index = i;
       JSONObject rule = rules.get(i);
@@ -1631,10 +1646,12 @@ public final class MainActivity extends Activity {
       row.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
       info.setOnClickListener(v -> editRule(list, rules, index));
       Button more = new Button(this);
-      more.setText("⋮");
+      more.setText("Options");
       more.setContentDescription("Options for rule " + (i + 1));
       Ui.styleButton(more, false);
-      row.addView(more, new LinearLayout.LayoutParams(dp(48), dp(48)));
+      more.setTextSize(12);
+      more.setPadding(dp(8), 0, dp(8), 0);
+      row.addView(more, new LinearLayout.LayoutParams(dp(72), dp(48)));
       more.setOnClickListener(
           v -> {
             PopupMenu menu = new PopupMenu(this, more);
@@ -1742,14 +1759,13 @@ public final class MainActivity extends Activity {
   private void scanner() {
     clear();
     selectTab(1);
-    heading("Find your paths", "Discover resolvers that carry your tunnel.");
+    heading("Scanner", "");
     if (profile() == null) {
       text(page, "Add a server profile so the scanner can verify the actual tunnel.");
       return;
     }
-    text(page, "Results are saved as they arrive. Pause and resume without losing your place.")
-        .setTextColor(Ui.MUTED);
-    LinearLayout settings = section(page, "Scan settings", "Targets and limits");
+
+    LinearLayout settings = section(page, "Scan settings", "");
     android.content.SharedPreferences prefs = getSharedPreferences("scanner", 0);
     ranges =
         field(

@@ -93,7 +93,7 @@ public final class SmokeInstrumentation extends Instrumentation {
       tapButton("Edit selected server");
       screenshot("server-editor");
       runOnMainSync(() -> activity.onBackPressed());
-      tapText("Scanner");
+      tapText("Scan");
       screenshot("scanner");
       tapText("Routing");
       screenshot("routing");

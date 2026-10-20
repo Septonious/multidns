@@ -1,0 +1,9 @@
+?   	github.com/Septonious/multidns/cmd/client	[no test files]
+?   	github.com/Septonious/multidns/cmd/scanner	[no test files]
+?   	github.com/Septonious/multidns/cmd/server	[no test files]
+--- FAIL: TestIdlePollingStaysBounded (8.30s)
+    stability_test.go:41: context deadline exceeded
+FAIL
+FAIL	github.com/Septonious/multidns/core	66.397s
+ok  	github.com/Septonious/multidns/mobile	1.760s
+FAIL

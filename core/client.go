@@ -28,6 +28,8 @@ type Stats struct {
 	TransportVersion string `json:"transport_version"`
 	PeerUploadWindow uint32 `json:"peer_upload_window"`
 	Hedges           uint64 `json:"hedges"`
+	DataHedges       uint64 `json:"data_hedges"`
+	ControlHedges    uint64 `json:"control_hedges"`
 
 	Queries    uint64 `json:"queries"`
 	Replies    uint64 `json:"replies"`
@@ -38,6 +40,11 @@ type Stats struct {
 	Streams    int64  `json:"streams"`
 }
 type Client struct {
+	dataHedges, controlHedges atomic.Uint64
+	flowFlight                map[flowKey]int
+	activeReaders             map[uint32]time.Time
+	activeUploads             atomic.Int64
+
 	admissionChoice      *admission
 	admissionChoiceAt    time.Time
 	admissionChoiceValid bool
@@ -157,7 +164,7 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{TransportVersion: "0.3.1", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
+	return Stats{TransportVersion: "0.3.2", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
@@ -201,10 +208,13 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 	if c.Profile.Adaptive && (f.Op == opRead || f.Op == opWrite) {
 		targets, hedgeDelay = c.bulkTargets(targets, f.Op, f.Bulk)
 	}
+	if c.Profile.Adaptive && f.Op != opRead && f.Op != opWrite {
+		targets, hedgeDelay = c.controlTargets(targets)
+	}
 	var primaryRelease func()
 	if c.Profile.Adaptive && (f.Op == opRead || f.Op == opWrite) {
 		var primary string
-		primary, primaryRelease, e = c.acquireAnyPath(ctx, targets, f.Op, f.Bulk)
+		primary, primaryRelease, e = c.acquireAnyPath(ctx, targets, f.Op, f.Bulk, f.Stream)
 		if e != nil {
 			return frame{}, e
 		}
@@ -243,7 +253,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			if index == 0 && primaryRelease != nil {
 				release = primaryRelease
 			} else if index > 0 && primaryRelease != nil {
-				release, err = c.tryPath(addr, f.Op)
+				release, err = c.tryPath(addr, f.Op, f.Stream)
 			} else {
 				release, err = c.acquirePath(raceCtx, addr, f.Op)
 			}
@@ -315,10 +325,17 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			c.queries.Add(1)
 			if index > 0 && hedgeDelay > 0 {
 				c.hedges.Add(1)
+				if f.Op == opRead || f.Op == opWrite {
+					c.dataHedges.Add(1)
+				} else {
+					c.controlHedges.Add(1)
+				}
 			}
+			fallback := false
 			r, err, done := c.exchangeDNSTracked(raceCtx, m, addr, "udp")
 			wireDone = done
 			if err == nil && r.Truncated {
+				fallback = true
 				c.adaptiveMu.Lock()
 				if h := c.health[addr]; h != nil {
 					h.TCPFallbacks++
@@ -340,6 +357,9 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				if err == nil && (answer.Session != f.Session || answer.Stream != f.Stream || answer.Seq != f.Seq || answer.Nonce != f.Nonce || answer.Op != f.Op || len(answer.Data) == 0) {
 					err = fmt.Errorf("%w: mismatched response", errInvalidReply)
 				}
+			}
+			if fallback && f.Op == opRead {
+				c.recordTCPFallback(addr, err, raceCtx.Err() != nil)
 			}
 			size := 0
 			if err == nil && answer.Data[0] == statusOK {
@@ -380,6 +400,7 @@ var errReadPending = errors.New("download chunk not ready")
 
 func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint32, waitOnce ...bool) ([]byte, error) {
 	delay := 20 * time.Millisecond
+	idleWaits := 0
 	group := base
 	for {
 		select {
@@ -391,6 +412,10 @@ func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint3
 		}
 		if ack != nil {
 			f.Ack = ack()
+		}
+		var wake <-chan struct{}
+		if f.wake != nil {
+			wake = f.wake()
 		}
 		answer, e := c.race(ctx, f, group%len(c.groupsSnapshot()))
 		f.Retry = false
@@ -409,6 +434,10 @@ func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint3
 				}
 				if f.Op == opRead {
 					delay = 20 * time.Millisecond
+					if c.Profile.Adaptive {
+						idleWaits++
+						delay = time.Duration(20<<min(3, idleWaits-1)) * time.Millisecond
+					}
 					// Idle head reads live for minutes. Re-evaluate their
 					// placement instead of pinning them to yesterday's best path.
 					if c.Profile.Adaptive {
@@ -437,6 +466,10 @@ func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint3
 			timer.Stop()
 			return nil, net.ErrClosed
 		case <-timer.C:
+		case <-wake:
+			timer.Stop()
+			idleWaits = 0
+			delay = 20 * time.Millisecond
 		}
 		delay = min(delay*2, 200*time.Millisecond)
 	}
@@ -509,6 +542,9 @@ type readResult struct {
 	e error
 }
 type Conn struct {
+	activityMu sync.Mutex
+	activity   chan struct{}
+
 	queuedACK  bool
 	writeLimit int
 	readWake   chan struct{}
@@ -552,12 +588,20 @@ func (s *Conn) window(operation ...byte) int {
 		ceiling = max(64, s.writeLimit)
 	}
 	traffic := s.traffic.Load()
-	if traffic < 4096 {
-		return base
+	desired := base
+	if traffic >= 4096 {
+		desired = min(128, base<<min(5, int(traffic/4096)))
 	}
-	grown := base << min(5, int(traffic/4096))
-	// Bound speculative work per stream; shared admission handles the pool.
-	return min(ceiling, max(base, min(grown, min(128, s.client.dataCapacity(op)))))
+	capacity := max(1, s.client.dataCapacity(op))
+	peers := s.client.readerCount()
+	if op == opWrite {
+		peers = max(1, int(s.client.activeUploads.Load()))
+	}
+	// Share a pool window across active flows, with two refill positions per
+	// flow. Previously every stream independently offered the entire pool budget.
+	share := (capacity+peers-1)/peers + 2
+	return max(1, min(ceiling, min(desired, share)))
+
 }
 
 func (s *Conn) opContext(read bool) (context.Context, context.CancelFunc) {
@@ -592,11 +636,14 @@ func (s *Conn) prefetch() {
 			// chunks wait for progress before trying again, avoiding N*window
 			// background polls on HTTP keepalive and upload-only connections.
 			b, err := s.client.rpcACK(ctx, frame{Op: opRead, Stream: s.id, Seq: seq,
-				Bulk: s.traffic.Load() >= 4096 && seq != epoch}, s.group(seq, opRead), s.readSeq.Load, seq != epoch)
+				Bulk: s.traffic.Load() >= 4096 && seq != epoch, wake: s.activityChannel}, s.group(seq, opRead), s.readSeq.Load, seq != epoch)
 			results <- completion{seq, epoch, readResult{b, err}}
 		}()
 	}
 	for {
+		if window > 1 {
+			window = uint32(s.window())
+		}
 		for seq := delivered; seq-delivered < window && seq-s.readSeq.Load() < 64; seq++ {
 			if active[seq] {
 				continue
@@ -619,6 +666,7 @@ func (s *Conn) prefetch() {
 				delete(waiting, result.seq)
 				pending[result.seq] = result.readResult
 				if result.e == nil && len(result.b) > 0 {
+					s.client.markReader(s.id)
 					window = uint32(s.window())
 				}
 			}
@@ -685,6 +733,12 @@ func (s *Conn) Write(b []byte) (int, error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
+	if len(b) > 1024 {
+		s.client.activeUploads.Add(1)
+		defer s.client.activeUploads.Add(-1)
+	}
+	s.notifyActivity()
+	defer s.notifyActivity()
 	capacity := s.client.uploadSize
 	if capacity < 8 {
 		return 0, fmt.Errorf("domain leaves insufficient upload capacity")
@@ -711,7 +765,7 @@ func (s *Conn) Write(b []byte) (int, error) {
 			offset += size
 			next++
 			go func() {
-				_, err := s.client.rpcACK(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Data: data, Bulk: s.traffic.Load() >= 4096}, s.group(seq, opWrite), s.readSeq.Load)
+				_, err := s.client.rpcACK(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Data: data, Bulk: len(b) > 1024 && s.traffic.Load() >= 4096}, s.group(seq, opWrite), s.readSeq.Load)
 				results <- completion{index, size, err}
 			}()
 		}
@@ -758,6 +812,7 @@ func (s *Conn) CloseWrite() error {
 func (s *Conn) Close() error {
 	s.closeOnce.Do(func() {
 		s.cancel()
+		s.client.forgetReader(s.id)
 		s.client.streams.Add(-1)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -787,4 +842,21 @@ func (s *Conn) SetWriteDeadline(t time.Time) error {
 	s.writeDeadline = t
 	s.deadlineMu.Unlock()
 	return nil
+}
+
+func (s *Conn) activityChannel() <-chan struct{} {
+	s.activityMu.Lock()
+	defer s.activityMu.Unlock()
+	if s.activity == nil {
+		s.activity = make(chan struct{})
+	}
+	return s.activity
+}
+func (s *Conn) notifyActivity() {
+	s.activityMu.Lock()
+	defer s.activityMu.Unlock()
+	if s.activity != nil {
+		close(s.activity)
+	}
+	s.activity = make(chan struct{})
 }

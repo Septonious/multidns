@@ -10,6 +10,7 @@ import (
 var errPathBusy = errors.New("resolver has no spare capacity")
 
 type admission struct {
+	stream  uint32
 	bulk    bool
 	op      byte
 	started time.Time
@@ -36,6 +37,9 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 		return false
 	}
 	if op == opRead {
+		if time.Now().Before(p.readRetryAt) {
+			return false
+		}
 		rx := max(1, p.limit-2)
 		if settings.RXWorkers > 0 {
 			rx = min(rx, settings.RXWorkers)
@@ -75,20 +79,28 @@ func (c *Client) leasePathLocked(addr string, op byte, bulk bool) func() {
 		c.adaptiveMu.Unlock()
 	}
 }
-func (c *Client) tryPath(addr string, op byte) (func(), error) {
+func (c *Client) tryPath(addr string, op byte, streams ...uint32) (func(), error) {
 	c.adaptiveMu.Lock()
 	defer c.adaptiveMu.Unlock()
 	if len(c.admissions) > 0 || !c.pathAvailableLocked(addr, op, true) {
 		return nil, errPathBusy
 	}
-	return c.leasePathLocked(addr, op, true), nil
+	stream := uint32(0)
+	if len(streams) > 0 {
+		stream = streams[0]
+	}
+	return c.leaseFlowLocked(addr, op, true, stream), nil
 }
 
-// One shared, FIFO admission queue per priority replaces hundreds of requests
+// One shared admission queue with per-flow fairness replaces hundreds of requests
 // pinned to individual resolvers. A waiting chunk has no resolver ownership:
 // removal of any failed path immediately redistributes its waiting work.
-func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte, bulk bool) (string, func(), error) {
-	a := &admission{bulk: bulk, op: op, started: time.Now()}
+func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte, bulk bool, streams ...uint32) (string, func(), error) {
+	stream := uint32(0)
+	if len(streams) > 0 {
+		stream = streams[0]
+	}
+	a := &admission{stream: stream, bulk: bulk, op: op, started: time.Now()}
 	c.adaptiveMu.Lock()
 	c.admissions = append(c.admissions, a)
 	c.wakeAdmissionsLocked()
@@ -161,7 +173,7 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 				c.dispatchDeficits[chosen] -= sum
 			}
 			remove()
-			release := c.leasePathLocked(chosen, op, bulk)
+			release := c.leaseFlowLocked(chosen, op, bulk, stream)
 			if h := c.health[chosen]; h != nil {
 				ms := float64(time.Since(a.started).Microseconds()) / 1000
 				h.QueueMS = .875*h.QueueMS + .125*ms
@@ -185,8 +197,8 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 	}
 }
 
-// A short request can overtake young bulk work, but work waiting 50 ms wins
-// over newer arrivals. Only eligible operations participate: blocked reads must
+// Flows with fewer requests on the wire get the next available credit. At equal
+// credit counts, aged bulk work wins over fresh interactive work. Blocked reads must
 // not prevent a writer from using the reserved TX room.
 func (c *Client) nextAdmissionLocked() *admission {
 	now := time.Now()
@@ -214,23 +226,42 @@ func (c *Client) nextAdmissionLocked() *admission {
 		return available[class]
 	}
 	var chosen *admission
+	best := int(^uint(0) >> 1)
 	for _, a := range c.admissions {
 		if !ready(a) {
 			continue
 		}
-		if chosen == nil {
-			chosen = a
+		score := 2 * c.flowFlight[flowKey{a.stream, a.op}]
+		if a.bulk && now.Sub(a.started) < 50*time.Millisecond {
+			score++
 		}
-		if now.Sub(chosen.started) >= 50*time.Millisecond || !chosen.bulk {
-			break
-		}
-		if !a.bulk {
+		if chosen == nil || score < best {
 			chosen = a
-			break
+			best = score
 		}
 	}
+
 	c.admissionChoice = chosen
 	c.admissionChoiceAt = now
 	c.admissionChoiceValid = true
 	return chosen
+}
+
+func (c *Client) leaseFlowLocked(addr string, op byte, bulk bool, stream uint32) func() {
+	release := c.leasePathLocked(addr, op, bulk)
+	if c.flowFlight == nil {
+		c.flowFlight = map[flowKey]int{}
+	}
+	key := flowKey{stream, op}
+	c.flowFlight[key]++
+	return func() {
+		c.adaptiveMu.Lock()
+		c.flowFlight[key]--
+		if c.flowFlight[key] == 0 {
+			delete(c.flowFlight, key)
+		}
+		c.wakeAdmissionsLocked()
+		c.adaptiveMu.Unlock()
+		release()
+	}
 }

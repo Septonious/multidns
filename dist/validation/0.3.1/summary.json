@@ -1,0 +1,24 @@
+{
+  "version": "0.3.1",
+  "android_version_code": 8,
+  "baseline": "e064927 / 0.3.0",
+  "problem": "Real phone unable to transfer; 162 queued requests, capacity 2 on 7 paths and 3 on 1, queue peaks 33.456 seconds despite one path with no timeouts.",
+  "fixes": [
+    "Exclude successful server-waiting reads from congestion cuts; sustained smoothed upload ACK RTT plus jitter allowance instead",
+    "Recover capacity toward startup using shared backlog after loss cooldown; respect per-resolver ceilings",
+    "Old in-flight replies do not immediately undo reduced capacity",
+    "Bound short-request overtaking to 50 ms for eligible queued work; blocked RX does not block free TX",
+    "Remove hard extra bulk-credit reservation; queued primaries precede speculative hedges",
+    "Expose oldest queued age, separate loss/delay cuts and idle recovery counts"
+  ],
+  "wire": "Unchanged; 0.3.0 server remains compatible. APK/client update required.",
+  "go_race_tests": "go test -race ./... -count=1 -timeout=180s passed; go vet ./... passed",
+  "regression_evidence": "3 deterministic regressions fail before and pass after; 6 focused post-fix controller/admission checks pass under race instrumentation",
+  "mixed_traffic": "26 idle streams; 8 heterogeneous paths with 60 ms injected read waits; forcibly collapsed to 2 credits; 4 concurrent workers perform 2 byte-verified 16 KiB HTTPS uploads/downloads each; independent groups, paired groups and fixed fallback pass",
+  "limits": "One broader old-version mixed HTTPS run also passed; no complete reproduction of exact phone failure, no real-link speed guarantee, no physical Oppo runtime test",
+  "android": "Build/lint passed, 0 errors/21 warnings; same retained signing cert, both JNI ABIs, all six ELF + APK ZIP 16 KiB alignment verified",
+  "certificate_sha256": "28d3a8d227f63d209bbf4575c128a2546e38e7265e95ec2243886ef5bfbc9c54",
+  "compatibility": "new/old, old/new, new/new authenticated startup and byte-verified 32 KiB HTTP upload/download",
+  "temporary_workaround": "Disable Adapt paths in profile transport settings, base window8, save and reconnect; local HTTPS fixture verified",
+  "apk_sha256": "4b18aabeb768b285c8c6d3b8329418285a463479f478676aead5ed81252434e0"
+}

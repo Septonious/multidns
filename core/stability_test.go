@@ -29,7 +29,7 @@ func TestIdlePollingStaysBounded(t *testing.T) {
 	defer cancel()
 	conn, err := client.DialContext(ctx, "tcp", echoTCP(t))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v; diagnostics=%s", err, client.StatsJSON())
 	}
 	defer conn.Close()
 	conn.SetDeadline(time.Now().Add(8 * time.Second))
@@ -38,10 +38,10 @@ func TestIdlePollingStaysBounded(t *testing.T) {
 	go func() { _, err := conn.Write(payload); done <- err }()
 	out := make([]byte, len(payload))
 	if _, err := io.ReadFull(conn, out); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v; diagnostics=%s", err, client.StatsJSON())
 	}
 	if err := <-done; err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v; diagnostics=%s", err, client.StatsJSON())
 	}
 	if !bytes.Equal(out, payload) {
 		t.Fatal("corrupt payload")

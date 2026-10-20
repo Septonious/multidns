@@ -1,3 +1,67 @@
+# Version 0.3.2 — 20 October 2026
+
+Current release: repository HEAD. Previous published source 36cb6b2 / 0.3.1.
+User reports similar throughput for 4 pairs vs 8 single-resolver groups, but much
+higher loaded RTT with singles; 333 shared queued requests, queue EWMA ~400ms,
+peaks ~2.28s. Phone screenshots 3.53/.74 and 3.74/.55 Mbps, download-loaded
+304/1308ms, upload-loaded657/870ms. Do not claim new real-phone measurements.
+
+Transport changes:
+- All adaptive data primaries already share the resolver pool, so changing group
+  shape does not multiply available bandwidth. Groups still define delayed data
+  backups. One-member groups remain data-hedge-free.
+- Controls previously stayed in their original group. Now select at most two
+  healthy low-cost global paths; delayed backup instead of immediate pair race.
+  Control/data hedge counts are separate, with total hedges retained.
+- Divide directional pool windows across active uploads/useful readers, plus two
+  refill positions per flow. Respect configured directional workers, current
+  opposite-direction leases and upload reservation. Readers age out after 1s;
+  closing a stream forgets its reader share. No extra wire fields.
+- Admission grants eligible flows with fewer wire leases first. At equal counts,
+  aged bulk wins over fresh short work after50ms; ties preserve queue order.
+  Lease counts survive loser cancellation until the physical exchange finishes.
+- Idle head WAITs back off20/40/80/160ms. Local writes broadcast activity to wake
+  waiting heads promptly; busy reads continue sliding refills.
+- Failed TCP download fallbacks enter2/4/8/16/30s read-only cooldown. Tiny probes
+  and successful uploads cannot clear it; expiry permits another read, validated
+  TCP download recovery clears the streak. Uploads remain eligible.
+- New tcp_fallback_failures/read_cooldown_ms diagnostics. Authentication, optional
+  XOR, TLS application handling and server protocol remain unchanged.
+
+Android 0.3.2 / versionCode9, same retained signing certificate. Text bottom tabs,
+standard chevrons, consistent card/button/field/spinner spacing, no handmade icons
+or "Ready when you are" filler. Disconnected dashboard hides empty rate stats;
+missing diagnostic doubles default to0. Parameter discovery shows cancel only
+while running, report actions after results, and per-resolver limits in a fold.
+Existing profiles retained. No physical Oppo is available in this workspace.
+
+Final checks: full follow-up race suite/vet passed; APK build/lint (0 errors/18 warnings), original signature, both JNI ABIs, all ELF/ZIP16KiB alignments, instrumentation compilation and all seven SHA checks passed. New/old, old/new, new/new byte-verified32KiB HTTP compatibility passed.
+
+Validation details: docs/PERFORMANCE.md and dist/validation. One sequential quiet
+many-stream comparison uses8x64KiB byte-verified echo transfers beside26 idle
+connections plus interactive application echo, on8 simulated35..120ms DNS paths:
+- Singles: bulk42.91->8.57s, echo p95 11411->317.3ms, queue peak13296->360.4ms.
+- Pairs: bulk32.60->9.42s, echo p95 8306->335.5ms, queue peak8296->953.9ms.
+- Retry counts27->0 /44->30. Retries are not eliminated. Baseline collected only
+  9/8 echo samples, new43/45. One batch, not a real-link Speedtest forecast.
+- New flow-sharing, worker-limit, control escape and read-cooldown tests.
+- A final full race run hit the8s idle-transfer test deadline once; three isolated
+  repeats passed. Retain failed run and follow-up full results without concealing
+  it or broadening the deadline. No precise cause established for that one run.
+- Headless Robolectric native renders passed360dp and320dp/1.3font, checking no
+  clipped tab labels and>=48dp navigation targets. Fixture native bindings are
+  shadowed; this does not verify VPN lifecycle. Images/source/log retained.
+
+Production: t.atmosl.ink ->ns2.atmosl.ink ->136.148.220.253. Preserve
+/etc/multidns/server.env and systemd public-IP listen override. User checkout can
+be detached: git pull --ff-only origin main. Existing0.3.0/0.3.1 server compatible;
+APK/client update required. Matching six Linux binaries rebuilt for completeness.
+No production SSH/authentication key is available; no VPS changes made here.
+
+---
+
+Historical handoffs follow.
+
 # Version 0.3.1 — 20 October 2026
 
 Current release: see repository HEAD. Previous source e064927 / 0.3.0.

@@ -24,8 +24,8 @@ multidns-client -profile profile.json -listen 127.0.0.1:1080
 
 The server and profile must use the same key. No key is shipped in the APK.
 The CLI provides a SOCKS5 endpoint; Android wraps it in a VpnService.
-In adaptive mode groups race controls, hedge data requests, and distribute unique
-bulk work across members and groups. Fixed scheduling retains group duplication.
+In adaptive mode healthy fast paths carry controls with a delayed backup; groups
+define data backups, and primary data work shares the whole resolver pool. Fixed scheduling retains group duplication.
 Each stream uses independent sequence numbers and a bounded retransmission window.
 Resolver failover preserves destination connections while server stream state lives.
 Switching independent servers creates a new session.
@@ -43,16 +43,16 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.3.1 repairs adaptive
-starvation and false capacity collapse from read long-polls in 0.3.0. It retains
-shared resolver admission, interactive priority, latency-based congestion control,
-independent-group failover/recovery, comprehensive dark diagnostics and per-path
-settings. **Find optimal parameters** measures authenticated payload sizes and
-TX/RX concurrency, with evidence and an explicit Apply action. See
+amd64/arm64 server, client, and scanner binaries. Version 0.3.2 shares request
+windows across busy streams, schedules shared credits fairly by flow, moves
+controls to healthy fast paths independently of group size, and backs off idle
+polls. Broken TCP download fallbacks enter a directional cooldown while uploads
+remain eligible. The dark Android UI uses text navigation, consistent spacing,
+standard chevrons and less idle/status copy. Comprehensive counters and
+**Find optimal parameters** remain under Diagnostics. See
 [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) for settings and counter definitions.
-Install the 0.3.1 APK before enabling adaptive scheduling again. The 0.3.0 server
-is compatible with this hotfix. Existing profiles remain supported; XOR and
-parameter discovery require a server from 0.3.0 or later.
+The 0.3.0/0.3.1 server is compatible; update the APK/client for these changes.
+Existing profiles, XOR obfuscation and authentication are unchanged.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
 

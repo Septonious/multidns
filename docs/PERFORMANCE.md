@@ -1,5 +1,60 @@
 # Performance and tuning
 
+## Version 0.3.2: many-stream queueing and group-independent controls
+
+The user's 0.3.1 snapshot showed 333 shared waiting requests, about 400 ms
+smoothed local queue delay and peaks around 2.28 seconds, despite fast DNS RTTs.
+Phone results were 3.53/0.74 and 3.74/0.55 Mbps, with upload-loaded latency
+657/870 ms and download-loaded latency 304/1308 ms. These are user measurements,
+not measurements of this update.
+
+Changing the same eight resolvers from pairs to single-member groups does not
+multiply primary bandwidth: adaptive admission already uses the full pool.
+Previously controls remained pinned to their original group; single-member
+groups could therefore delay a flush/handshake on one slow path. Adaptive
+controls now choose at most two healthy low-cost paths across groups, sending
+a delayed backup rather than immediately duplicating every control packet.
+Bulk backup policy remains group-based; one-member groups do not hedge data.
+
+Every busy stream previously offered a window sized for the whole resolver pool.
+TX/RX windows now divide usable directional capacity between active bulk flows,
+with two refill positions per flow. Completed readers age out after one second;
+idle connection heads do not retain bulk window shares. Admission selects the
+eligible flow with the fewest wire leases; at equal counts, old bulk requests
+beat fresh short requests after 50 ms. This prevents one older large transfer
+from filling the queue ahead of every new request. It does not promise that
+application loaded RTT stays below 50 ms or remove all device/server buffering.
+
+Idle head reads back off to 160 ms between repeated WAIT responses. Local writes
+wake the wait promptly; busy reads retain immediate refill. Failed authenticated
+TCP download fallbacks quarantine only that path's reads for 2, 4, 8, 16, then
+30 seconds. Tiny health probes and successful uploads cannot clear the cooldown.
+After expiry, a read can test recovery; a validated TCP success clears its streak.
+This addresses a path with 60 TCP fallbacks, 26 reconnections and only 20,755 B
+of accepted downloads in the supplied snapshot, without disabling useful uploads.
+New diagnostics split data/control backups and expose failed TCP fallbacks and
+remaining read cooldown. No wire format or cryptographic overhead was added.
+
+One sequential quiet comparison on this two-CPU workspace (one measured batch):
+
+| Group members | Version | 8 echo transfers (s) | App echo p95 (ms) | Echo samples | Peak local queue (ms) | ARQ retries |
+|---|---|---:|---:|---:|---:|---:|
+| 1 | 0.3.1 | 42.91 | 11411.0 | 9 | 13296.0 | 27 |
+| 1 | 0.3.2 | 8.57 | 317.3 | 43 | 360.4 | 0 |
+| 2 | 0.3.1 | 32.60 | 8306.0 | 8 | 8296.0 | 44 |
+| 2 | 0.3.2 | 9.42 | 335.5 | 45 | 953.9 | 30 |
+
+All transfers were byte-verified. The baseline collected few interactive samples
+because each waited much longer. Retries remain possible under load; one updated
+paired run still recorded 30, so this is not a claim of eliminating retransmission.
+Raw logs are retained, including earlier exploratory runs with build contention.
+
+Controlled results and limitations are recorded in `dist/validation/summary.json`.
+The many-stream benchmark verifies eight concurrent 64 KiB echo transfers beside
+26 idle connections and application-level echo, across eight heterogeneous DNS
+paths. Echo latency includes both tunnel directions, admission and application
+I/O; it is not a control probe or a prediction of the Oppo's Speedtest results.
+
 ## Version 0.3.1: repair 0.3.0 starvation and capacity collapse
 
 The user's real 0.3.0 link became unusable despite successful authentication.

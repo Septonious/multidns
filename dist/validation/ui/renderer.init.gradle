@@ -1,0 +1,17 @@
+allprojects {
+ afterEvaluate { p ->
+  if(p.path == ':app') {
+   p.android.testOptions.unitTests.includeAndroidResources = true
+   p.android.sourceSets.test.java.srcDir('/workspace/work/multidns-ui-renderer/src')
+   p.dependencies.add('testImplementation','junit:junit:4.13.2')
+   p.dependencies.add('testImplementation','org.robolectric:robolectric:4.14.1')
+   p.tasks.withType(Test).configureEach {
+    systemProperty 'robolectric.dependency.repo.url','https://repo.maven.apache.org/maven2'
+    systemProperty 'robolectric.graphicsMode','NATIVE'
+    maxHeapSize='2g'
+    System.getenv('MULTIDNS_UI_JVM_PROPS')?.split('\n')?.each { jvmArgs it }
+    testLogging { events 'passed','failed','skipped'; exceptionFormat 'full' }
+   }
+  }
+ }
+}

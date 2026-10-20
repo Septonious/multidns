@@ -1,4 +1,4 @@
-# Diagnostics and resolver settings (0.3.0)
+# Diagnostics and resolver settings (0.3.2)
 
 Update the server before installing the matching APK. Existing saved profiles and
 authentication keys remain valid. Open **Diagnostics** in the bottom navigation.
@@ -76,14 +76,21 @@ Live counters reset when a connection is started. The debug view provides:
 - Accepted upload/download bytes. Retransmitted payload can be counted again;
   use the dashboard's application byte counters for end-to-end transfer totals.
 
-0.3.1 fixes a 0.3.0 admission/congestion regression. New short requests can
-only overtake eligible older work until it has waited 50 ms; that is an overtaking
-limit, not a promise that total queue delay is below 50 ms. Successful read
-long-polls never trigger delay-based cuts. That controller uses sustained,
-smoothed upload ACK timing with a jitter allowance. Successful idle polls check
-the shared backlog and can recover startup capacity after a loss episode.
-The debug view includes oldest admission age and separate capacity cut/recovery
-counters. A reachable authenticated resolver does not prove application transfer.
+0.3.2 shares directional window budgets across active bulk flows and grants the
+next available wire credit to the eligible flow with the fewest credits already
+leased. At equal credit counts, older bulk work wins over fresh short work after
+50 ms. This is an admission policy, not a guarantee of total queue delay.
+Controls use healthy fast paths across groups; group membership still defines
+bulk backup candidates. Data/control backups have separate global counters.
+Successful read long-polls never trigger delay cuts; sustained smoothed upload
+ACK delay with jitter allowance still does. Shared backlog can recover startup
+capacity after a loss episode.
+
+`tcp_fallback_failures` counts unsuccessful TCP download fallbacks.
+`read_cooldown_ms` shows remaining time before reads can use that path again.
+Failed large replies back off for 2..30 seconds; tiny probes and successful
+uploads do not revive the download path. Upload eligibility is preserved.
+A reachable authenticated resolver does not prove successful large downloads.
 
 A request in the shared admission queue has no resolver ownership. Per-resolver
 `queued` remains available for legacy path admission; `admission_queued` is the
