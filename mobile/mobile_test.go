@@ -62,3 +62,17 @@ func TestStopCancelsPendingStartup(t *testing.T) {
 		})
 	}
 }
+
+func TestCancelParameterTestBeforeWorkerStarts(t *testing.T) {
+	engine := NewEngine()
+	engine.CancelParameterTest()
+	profile, _ := json.Marshal(core.Profile{Domain: "t.test", Key: "0123456789abcdef", Groups: []core.Group{{Resolvers: []string{"127.0.0.1:53"}}}})
+	report, err := engine.FindOptimalParameters(string(profile), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result core.TuningReport
+	if err := json.Unmarshal([]byte(report), &result); err != nil || !result.Cancelled || len(result.Settings) > 0 {
+		t.Fatalf("early cancel ignored: %v %s", err, report)
+	}
+}

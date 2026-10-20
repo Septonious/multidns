@@ -13,6 +13,23 @@ import (
 )
 
 type ResolverHealth struct {
+	Queries         uint64  `json:"queries"`
+	Replies         uint64  `json:"replies"`
+	Retransmissions uint64  `json:"retransmissions"`
+	Hedges          uint64  `json:"hedges"`
+	Reconnections   uint64  `json:"reconnections"`
+	Connections     uint64  `json:"connections"`
+	Recoveries      uint64  `json:"recoveries"`
+	TCPFallbacks    uint64  `json:"tcp_fallbacks"`
+	Uploaded        uint64  `json:"uploaded"`
+	Downloaded      uint64  `json:"downloaded"`
+	QueueMS         float64 `json:"queue_ms"`
+	MaxQueueMS      float64 `json:"max_queue_ms"`
+	MinRTTMS        float64 `json:"min_rtt_ms"`
+	MTU             int     `json:"mtu"`
+	TXWorkers       int     `json:"tx_workers"`
+	RXWorkers       int     `json:"rx_workers"`
+
 	Timeouts       uint64    `json:"timeouts"`
 	DNSErrors      uint64    `json:"dns_errors"`
 	InvalidReplies uint64    `json:"invalid_replies"`
@@ -74,6 +91,13 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 	out := []ResolverHealth{}
 	for _, h := range c.health {
 		copy := *h
+		settings := c.Profile.ResolverSettings[h.Endpoint]
+		copy.MTU = settings.MTU
+		if copy.MTU == 0 {
+			copy.MTU = 1232
+		}
+		copy.TXWorkers = settings.TXWorkers
+		copy.RXWorkers = settings.RXWorkers
 		if p := c.paths[h.Endpoint]; p != nil {
 			copy.Capacity = p.limit
 			copy.WireInFlight = p.flight
@@ -118,6 +142,7 @@ func (c *Client) recordStart(addr string) {
 		c.health[addr] = h
 	}
 	h.InFlight++
+	h.Queries++
 }
 func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte, err error, canceled bool) {
 	c.adaptiveMu.Lock()
@@ -145,16 +170,32 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		default:
 			h.SocketErrors++
 		}
-		if h.Failures >= 3 {
-			h.Healthy = false
-		}
+		// Quarantine after the first observed failure. Outstanding accepted
+		// chunks keep their ARQ sequence; new/queued chunks use other paths.
+		h.Healthy = false
+		c.pathLocked(addr).retryAt = time.Now().Add(300 * time.Millisecond)
+		c.wakeAdmissionsLocked()
 		return
 	}
+	if !h.Healthy {
+		h.Recoveries++
+	}
 	h.Healthy = true
+	h.Replies++
+	if op == opWrite {
+		h.Uploaded += uint64(size)
+	}
+	if op == opRead {
+		h.Downloaded += uint64(size)
+	}
 	h.Failures = 0
+	c.wakeAdmissionsLocked()
 	// A successful idle long-poll includes server wait time, not network RTT.
 	if op != opRead || size > 0 {
 		rtt := float64(elapsed.Microseconds()) / 1000
+		if h.MinRTTMS == 0 || rtt < h.MinRTTMS {
+			h.MinRTTMS = rtt
+		}
 		if h.RTTMS == 0 {
 			h.RTTMS = rtt
 			h.RTTVarianceMS = rtt / 2
@@ -317,6 +358,7 @@ func (c *Client) TestLatency(ctx context.Context, emit func(ResolverHealth)) {
 					// or replace the loaded-path RTT estimator.
 					if !old.Healthy && h.Healthy {
 						old.Failures = 0
+						old.Recoveries++
 					}
 					old.Healthy = h.Healthy
 					if old.RTTMS == 0 {
@@ -327,6 +369,7 @@ func (c *Client) TestLatency(ctx context.Context, emit func(ResolverHealth)) {
 					h = *old
 				}
 				c.health[addr] = &h
+				c.wakeAdmissionsLocked()
 				c.adaptiveMu.Unlock()
 				if emit != nil {
 					emit(h)
@@ -392,7 +435,7 @@ func (c *Client) regroup() bool {
 	return true
 }
 func (c *Client) maintain() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {

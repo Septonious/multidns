@@ -2,7 +2,7 @@
 
 Go DNS tunnel and Android VPN with resolver groups, live scanning, profiles,
 and app/destination split routing. Experimental wire protocol v1; incompatible
-with other DNS tunnels. Payload is not encrypted: use application TLS where needed.
+with other DNS tunnels. Optional zero-byte XOR obfuscation is not encryption; use application TLS for confidentiality.
 All transport frames have an 8-byte truncated HMAC-SHA256 authentication tag.
 
 ## Local development
@@ -43,17 +43,20 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.2.2 distributes unique
-bulk work across group members, uses delayed backup requests, accounts for canceled
-queries still on the wire, and negotiates larger upload windows. The dark theme
-and existing profiles remain supported. Enable adaptive scheduling and update
-both server and APK; older peers safely use the smaller upload window.
+amd64/arm64 server, client, and scanner binaries. Version 0.3.0 adds shared
+resolver admission, interactive priority, latency-based congestion control,
+independent-group failover/recovery, comprehensive dark diagnostics and per-path
+settings. **Find optimal parameters** measures authenticated payload sizes and
+TX/RX concurrency, with evidence and an explicit Apply action. See
+[`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) for settings and counter definitions.
+Enable adaptive scheduling and update both server and APK. Existing profiles
+remain supported; XOR and the new parameter tests require the updated server.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
 
 See [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) for tuning, counter definitions,
 and controlled before/after measurements. Resolver probe RTT is not a throughput
-measurement, and two members of a racing group duplicate requests.
+measurement. Members carry unique work; delayed backup attempts can duplicate it.
 
 The GitHub Actions `Prototype builds` workflow tests Go, builds Linux amd64/arm64
 server and CLI binaries, builds a debug-signed Android APK, and uploads artifacts.

@@ -26,6 +26,14 @@ public final class MainActivity extends Activity {
   private final ArrayList<Ui.Icon> navIcons = new ArrayList<>();
   private final ArrayList<LinearLayout> navItems = new ArrayList<>();
   private int currentTab;
+  private TextView diagnosticsSummary, tuningOutput;
+  private LinearLayout diagnosticsPaths;
+  private final HashMap<String, TextView> resolverViews = new HashMap<>();
+  private volatile mobile.Engine tuningEngine;
+  private volatile boolean tuningRunning;
+  private String tuningReport, tuningProfile;
+  private Button applyTuning;
+
   private boolean editing;
   private TextView dashboard, scanStatus, scanResults;
   private EditText ranges, workers, timeout, zone;
@@ -41,6 +49,7 @@ public final class MainActivity extends Activity {
       new Runnable() {
         public void run() {
           if (dashboard != null) updateDashboard();
+          if (diagnosticsSummary != null) updateDiagnostics();
           if (scanStatus != null)
             scanStatus.setText(
                 ScannerService.state
@@ -155,7 +164,7 @@ public final class MainActivity extends Activity {
     LinearLayout nav = new LinearLayout(this);
     nav.setBackground(Ui.shape(this, Ui.SURFACE, 24, Ui.LINE));
     nav.setPadding(dp(8), dp(8), dp(8), dp(8));
-    String[] names = {"Connect", "Scanner", "Routing"};
+    String[] names = {"Connect", "Scanner", "Routing", "Diagnostics"};
     for (int i = 0; i < names.length; i++) {
       final int tab = i;
       LinearLayout item = new LinearLayout(this);
@@ -174,7 +183,8 @@ public final class MainActivity extends Activity {
           v -> {
             if (tab == 0) servers();
             else if (tab == 1) scanner();
-            else routing();
+            else if (tab == 2) routing();
+            else diagnostics();
           });
       nav.addView(item, new LinearLayout.LayoutParams(0, -1, 1));
       navLabels.add(label);
@@ -260,6 +270,11 @@ public final class MainActivity extends Activity {
 
   private void clear() {
     editing = false;
+    diagnosticsSummary = null;
+    diagnosticsPaths = null;
+    resolverViews.clear();
+    tuningOutput = null;
+    applyTuning = null;
     page.removeAllViews();
     scroll.scrollTo(0, 0);
     dashboard = null;
@@ -436,6 +451,10 @@ public final class MainActivity extends Activity {
                 TunnelService.disconnect(this);
               } else {
                 if (profile() == null) return;
+                if (tuningRunning) {
+                  toast("Finish or cancel parameter discovery before connecting.");
+                  return;
+                }
                 pendingProfile = profile().toString();
                 Intent permission = VpnService.prepare(this);
                 if (permission != null) startActivityForResult(permission, 41);
@@ -618,7 +637,7 @@ public final class MainActivity extends Activity {
         section(
             page,
             "Resolver groups",
-            "Groups share independent work. Members race for the first reply.");
+            "Healthy resolvers share independent work. Failed paths are bypassed automatically.");
     text(paths, "One group per line. Separate members with commas. Up to 100 resolvers.")
         .setTextColor(Ui.MUTED);
     StringBuilder groups = new StringBuilder();
@@ -666,6 +685,30 @@ public final class MainActivity extends Activity {
     adaptive.setChecked(original.optBoolean("adaptive", true));
     tuning.addView(adaptive);
     Ui.styleCheck(adaptive);
+    CheckBox xor = new CheckBox(this);
+    xor.setText("XOR obfuscation · zero added bytes (updated server required)");
+    xor.setChecked(original.optString("obfuscation").equals("xor"));
+    Ui.styleCheck(xor);
+    tuning.addView(xor);
+    text(
+            tuning,
+            "HTTPS already uses TLS. XOR masks payloads; it does not provide secure encryption."
+                + " Authentication remains enabled.")
+        .setTextColor(Ui.MUTED);
+    EditText latencyBudget =
+        field(
+            tuning,
+            "Target added network delay (5–500 ms)",
+            "" + original.optInt("latency_target_ms", 30),
+            false);
+    latencyBudget.setInputType(InputType.TYPE_CLASS_NUMBER);
+    EditText exchangeTimeout =
+        field(
+            tuning,
+            "Maximum DNS timeout (100–30000 ms)",
+            "" + original.optInt("timeout_ms", 1500),
+            false);
+    exchangeTimeout.setInputType(InputType.TYPE_CLASS_NUMBER);
     CheckBox automatic = new CheckBox(this);
     automatic.setText("Automatically form groups on each connection");
     automatic.setChecked(original.optBoolean("automatic_groups", false));
@@ -755,6 +798,9 @@ public final class MainActivity extends Activity {
             p.put("mode", mode.getSelectedItemPosition() == 1 ? "affinity" : "stripe");
             p.put("window", Integer.parseInt(window.getText().toString()));
             p.put("adaptive", adaptive.isChecked());
+            p.put("obfuscation", xor.isChecked() ? "xor" : "none");
+            p.put("latency_target_ms", Integer.parseInt(latencyBudget.getText().toString()));
+            p.put("timeout_ms", Integer.parseInt(exchangeTimeout.getText().toString()));
             p.put("automatic_groups", automatic.isChecked());
             p.put("group_size", Integer.parseInt(groupSize.getText().toString()));
             p.put("group_count", Integer.parseInt(groupCount.getText().toString()));
@@ -876,6 +922,496 @@ public final class MainActivity extends Activity {
                 return true;
             }
           });
+    }
+  }
+
+  private void diagnostics() {
+    clear();
+    selectTab(3);
+    heading("Diagnostics", "Understand each path. Measure before tuning.");
+    LinearLayout summary =
+        section(
+            page,
+            "Live transport",
+            "Counters reset on connection. Byte totals count accepted payloads.");
+    diagnosticsSummary = text(summary, "");
+    diagnosticsSummary.setTextIsSelectable(true);
+    button(summary, "Copy diagnostics", () -> copyDebug(TunnelService.stats));
+    LinearLayout tune =
+        section(
+            page,
+            "Parameter discovery",
+            "Tests full-size authenticated TXT replies, upload payloads and TX/RX concurrency."
+                + " Recommendations favor throughput within your latency budget; results vary with"
+                + " network conditions.");
+    button(tune, "Find optimal parameters", this::startParameterTest);
+    button(
+        tune,
+        "Cancel parameter test",
+        () -> {
+          mobile.Engine e = tuningEngine;
+          if (e != null) e.cancelParameterTest();
+        });
+    tuningOutput =
+        text(
+            tune,
+            tuningRunning
+                ? "Tests running…"
+                : (tuningReport == null
+                    ? "Ready. Update the server before testing."
+                    : formatTuning(tuningReport)));
+    tuningOutput.setTextIsSelectable(true);
+    applyTuning = button(tune, "Apply found parameters to resolvers", this::applyParameters);
+    applyTuning.setVisibility(canApplyTuning() ? View.VISIBLE : View.GONE);
+    button(tune, "View parameter test details", this::showTuningDetails);
+    button(
+        tune,
+        "Copy parameter test report",
+        () -> {
+          if (tuningReport != null) copyDebug(tuningReport);
+        });
+    if (profile() != null) {
+      LinearLayout settings =
+          section(
+              page,
+              "Settings",
+              "Per-profile limits for adaptive mode. Reconnect to activate saved changes. TX/RX"
+                  + " workers limit concurrent DNS exchanges across all streams; 0 = automatic.");
+      button(settings, "Connection and transport settings", () -> edit(selected));
+      JSONObject stored = profile().optJSONObject("resolver_settings");
+      for (String endpoint : profileEndpoints()) {
+        JSONObject cfg = stored == null ? null : stored.optJSONObject(endpoint);
+        button(
+            settings,
+            endpoint
+                + " · "
+                + (cfg == null
+                    ? "Auto"
+                    : ("MTU "
+                        + cfg.optInt("mtu", 1232)
+                        + " · TX/RX "
+                        + cfg.optInt("tx_workers")
+                        + "/"
+                        + cfg.optInt("rx_workers"))),
+            () -> resolverSettings(endpoint));
+      }
+      button(
+          settings,
+          "Reset resolver limits to automatic",
+          () -> {
+            try {
+              JSONObject copy = new JSONObject(profile().toString());
+              copy.remove("resolver_settings");
+              profiles.put(selected, copy);
+              save();
+              diagnostics();
+              toast("Automatic limits saved. Reconnect to activate.");
+            } catch (Exception e) {
+              error(e.getMessage());
+            }
+          });
+    }
+    diagnosticsPaths =
+        section(
+            page,
+            "Resolver statistics",
+            "Queue delay includes local admission; RTT measures DNS exchanges. Retransmissions"
+                + " count ARQ reissues on this path; backups are separate hedges.");
+    updateDiagnostics();
+  }
+
+  private void toast(String message) {
+    Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+  }
+
+  private void copyDebug(String data) {
+    ((ClipboardManager) getSystemService(CLIPBOARD_SERVICE))
+        .setPrimaryClip(ClipData.newPlainText("MultiDNS diagnostics", data));
+    toast("Copied");
+  }
+
+  private LinkedHashSet<String> profileEndpoints() {
+    LinkedHashSet<String> out = new LinkedHashSet<>();
+    if (profile() == null) return out;
+    JSONArray groups = profile().optJSONArray("groups");
+    for (int i = 0; groups != null && i < groups.length(); i++) {
+      JSONArray rs = groups.optJSONObject(i).optJSONArray("resolvers");
+      for (int j = 0; rs != null && j < rs.length(); j++) out.add(rs.optString(j));
+    }
+    JSONArray pool = profile().optJSONArray("resolver_pool");
+    for (int i = 0; pool != null && i < pool.length(); i++) out.add(pool.optString(i));
+    LinkedHashSet<String> normalized = new LinkedHashSet<>();
+    for (String endpoint : out) {
+      try {
+        normalized.add(Mobile.normalizeResolver(endpoint));
+      } catch (Exception ignored) {
+      }
+    }
+    return normalized;
+  }
+
+  private void updateDiagnostics() {
+    try {
+      JSONObject stats = new JSONObject(TunnelService.stats);
+      StringBuilder total =
+          new StringBuilder(
+              TunnelService.state
+                  + " · "
+                  + stats.optString("transport_version", BuildConfig.VERSION_NAME)
+                  + "\n");
+      String[] labels = {
+        "Resolver attempts",
+        "Replies",
+        "ARQ retries",
+        "Backup attempts",
+        "Timeouts",
+        "DNS errors",
+        "Invalid replies",
+        "Socket errors",
+        "Not-ready replies",
+        "Network changes",
+        "Streams",
+        "Queued requests"
+      };
+      String[] keys = {
+        "queries",
+        "replies",
+        "retries",
+        "hedges",
+        "timeouts",
+        "dns_errors",
+        "invalid_replies",
+        "socket_errors",
+        "waits",
+        "network_changes",
+        "streams",
+        "admission_queued"
+      };
+      for (int i = 0; i < keys.length; i++)
+        total.append(labels[i]).append(": ").append(stats.optLong(keys[i])).append("\n");
+      diagnosticsSummary.setText(total.toString());
+      JSONArray resolvers = stats.optJSONArray("resolvers");
+      for (int i = 0; resolvers != null && i < resolvers.length(); i++) {
+        JSONObject r = resolvers.getJSONObject(i);
+        String endpoint = r.getString("endpoint");
+        TextView view = resolverViews.get(endpoint);
+        if (view == null) {
+          LinearLayout box =
+              fold(diagnosticsPaths, endpoint, "Live counters and queue measurements");
+          view = text(box, "");
+          view.setTextIsSelectable(true);
+          resolverViews.put(endpoint, view);
+        }
+        StringBuilder row =
+            new StringBuilder(
+                r.optBoolean("healthy") ? "Healthy" : "Unavailable · redistributing work");
+        row.append(
+            String.format(
+                Locale.ROOT,
+                "\nRTT %.1f ms · min %.1f · variance %.1f\nQueue %.1f ms · peak %.1f",
+                r.optDouble("rtt_ms"),
+                r.optDouble("min_rtt_ms"),
+                r.optDouble("rtt_variance_ms"),
+                r.optDouble("queue_ms"),
+                r.optDouble("max_queue_ms")));
+        String[] names = {
+          "Capacity",
+          "Wire in flight",
+          "Active requests",
+          "Attempts",
+          "Replies",
+          "Retransmissions",
+          "Backups",
+          "Timeouts",
+          "DNS errors",
+          "Invalid replies",
+          "Socket errors",
+          "Connections",
+          "Reconnections",
+          "Recoveries",
+          "TCP fallbacks",
+          "Uploaded bytes",
+          "Downloaded bytes",
+          "DNS MTU",
+          "TX limit (0=auto)",
+          "RX limit (0=auto)"
+        };
+        String[] fields = {
+          "capacity",
+          "wire_in_flight",
+          "in_flight",
+          "queries",
+          "replies",
+          "retransmissions",
+          "hedges",
+          "timeouts",
+          "dns_errors",
+          "invalid_replies",
+          "socket_errors",
+          "connections",
+          "reconnections",
+          "recoveries",
+          "tcp_fallbacks",
+          "uploaded",
+          "downloaded",
+          "mtu",
+          "tx_workers",
+          "rx_workers"
+        };
+        for (int j = 0; j < fields.length; j++)
+          row.append("\n").append(names[j]).append(": ").append(r.optLong(fields[j]));
+        row.append("\nLast error: ").append(r.optString("last_error", "none"));
+        view.setText(row.toString());
+      }
+    } catch (Exception ignored) {
+    }
+  }
+
+  private void resolverSettings(String endpoint) {
+    if (profile() == null) return;
+    JSONObject all = profile().optJSONObject("resolver_settings"),
+        cfg = all == null ? null : all.optJSONObject(endpoint);
+    if (cfg == null) cfg = new JSONObject();
+    LinearLayout form = new LinearLayout(this);
+    form.setOrientation(LinearLayout.VERTICAL);
+    form.setPadding(dp(20), dp(8), dp(20), dp(12));
+    text(
+        form,
+        "0 uses automatic limits. DNS MTU is the UDP DNS message budget. Upload payload is limited"
+            + " by the tunnel domain. Workers cap in-flight exchanges.");
+    EditText mtu = field(form, "DNS MTU (512–1232; 0 = auto)", "" + cfg.optInt("mtu"), false),
+        tx = field(form, "TX workers (0–32)", "" + cfg.optInt("tx_workers"), false),
+        rx = field(form, "RX workers (0–32)", "" + cfg.optInt("rx_workers"), false),
+        upload =
+            field(form, "Upload payload bytes (0 = auto)", "" + cfg.optInt("upload_mtu"), false);
+    for (EditText input : new EditText[] {mtu, tx, rx, upload})
+      input.setInputType(InputType.TYPE_CLASS_NUMBER);
+    ScrollView scrollForm = new ScrollView(this);
+    scrollForm.addView(form);
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle(endpoint)
+            .setView(scrollForm)
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel", null)
+            .create();
+    dialog.setOnShowListener(
+        v ->
+            dialog
+                .getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(
+                    w -> {
+                      try {
+                        JSONObject copy = new JSONObject(profile().toString()),
+                            limits = copy.optJSONObject("resolver_settings");
+                        if (limits == null) limits = new JSONObject();
+                        JSONObject values =
+                            new JSONObject()
+                                .put("mtu", Integer.parseInt(mtu.getText().toString()))
+                                .put("tx_workers", Integer.parseInt(tx.getText().toString()))
+                                .put("rx_workers", Integer.parseInt(rx.getText().toString()))
+                                .put("upload_mtu", Integer.parseInt(upload.getText().toString()));
+                        limits.put(endpoint, values);
+                        copy.put("resolver_settings", limits);
+                        Mobile.validate(copy.toString());
+                        profiles.put(selected, copy);
+                        save();
+                        dialog.dismiss();
+                        diagnostics();
+                        toast("Saved. Reconnect to activate.");
+                      } catch (Exception e) {
+                        error(e.getMessage());
+                      }
+                    }));
+    dialog.show();
+  }
+
+  private boolean canApplyTuning() {
+    try {
+      return !tuningRunning
+          && tuningReport != null
+          && tuningProfile != null
+          && profile() != null
+          && profile().toString().equals(tuningProfile)
+          && !new JSONObject(tuningReport).optBoolean("cancelled")
+          && new JSONObject(tuningReport).getJSONObject("resolver_settings").length() > 0;
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  private String formatTuning(String report) {
+    try {
+      JSONObject json = new JSONObject(report);
+      StringBuilder out =
+          new StringBuilder(
+              json.optBoolean("cancelled")
+                  ? "Cancelled. No settings applied.\n"
+                  : "Completed. Review recommendations before applying.\n");
+      JSONArray results = json.getJSONArray("resolvers");
+      for (int i = 0; i < results.length(); i++) {
+        JSONObject r = results.getJSONObject(i), cfg = r.getJSONObject("settings");
+        out.append(r.getString("endpoint")).append("\n");
+        if (r.has("error")) out.append(r.getString("error"));
+        else
+          out.append("DNS MTU ")
+              .append(cfg.optInt("mtu"))
+              .append(" · upload ")
+              .append(cfg.optInt("upload_mtu"))
+              .append(" B · TX ")
+              .append(cfg.optInt("tx_workers"))
+              .append(" / RX ")
+              .append(cfg.optInt("rx_workers"))
+              .append(" · ")
+              .append(r.getJSONArray("trials").length())
+              .append(" trials");
+        out.append("\n");
+      }
+      return out.toString();
+    } catch (Exception e) {
+      return "Unable to read test report";
+    }
+  }
+
+  private void showTuningDetails() {
+    if (tuningReport == null) {
+      toast("Run parameter discovery first.");
+      return;
+    }
+    try {
+      JSONObject report = new JSONObject(tuningReport);
+      StringBuilder out = new StringBuilder(formatTuning(tuningReport));
+      JSONArray results = report.getJSONArray("resolvers");
+      for (int i = 0; i < results.length(); i++) {
+        JSONObject resolver = results.getJSONObject(i);
+        out.append("\n").append(resolver.getString("endpoint")).append("\n");
+        JSONArray trials = resolver.getJSONArray("trials");
+        for (int j = 0; j < trials.length(); j++) {
+          JSONObject trial = trials.getJSONObject(j);
+          out.append(
+              String.format(
+                  Locale.ROOT,
+                  "%s · MTU %d · TX payload %d B · %d workers\n"
+                      + "%d/%d replies · p95 %.1f ms · %.1f KiB/s\n\n",
+                  trial.optString("direction").toUpperCase(Locale.ROOT),
+                  trial.optInt("mtu"),
+                  trial.optInt("upload_mtu"),
+                  trial.optInt("workers"),
+                  trial.optInt("received"),
+                  trial.optInt("sent"),
+                  trial.optDouble("p95_ms"),
+                  trial.optDouble("bytes_per_second") / 1024));
+        }
+      }
+      ScrollView scroller = new ScrollView(this);
+      TextView detail = Ui.label(this, out.toString(), 14, Ui.INK, false);
+      detail.setPadding(dp(20), dp(16), dp(20), dp(16));
+      detail.setTextIsSelectable(true);
+      scroller.addView(detail);
+      new AlertDialog.Builder(this)
+          .setTitle("Parameter test evidence")
+          .setView(scroller)
+          .setPositiveButton("Done", null)
+          .show();
+    } catch (Exception e) {
+      error(e.getMessage());
+    }
+  }
+
+  private void startParameterTest() {
+    if (profile() == null) {
+      error("Add a server first.");
+      return;
+    }
+    if (tuningRunning) {
+      toast("Tests are already running");
+      return;
+    }
+    if (TunnelService.instance != null) {
+      error(
+          "Disconnect the VPN before parameter discovery so tests measure resolvers"
+              + " independently.");
+      return;
+    }
+    if (ScannerService.state.equals("Scanning")) {
+      error("Stop the resolver scan before parameter discovery.");
+      return;
+    }
+    tuningRunning = true;
+    tuningReport = null;
+    tuningProfile = profile().toString();
+    tuningEngine = Mobile.newEngine();
+    final String config = tuningProfile;
+    final mobile.Engine engine = tuningEngine;
+    if (applyTuning != null) applyTuning.setVisibility(View.GONE);
+    new Thread(
+            () -> {
+              try {
+                String report =
+                    engine.findOptimalParameters(
+                        config,
+                        null,
+                        message -> {
+                          try {
+                            JSONObject event = new JSONObject(message);
+                            String line =
+                                event.optString("Endpoint") + " · " + event.optString("Stage");
+                            handler.post(
+                                () -> {
+                                  if (tuningOutput != null) tuningOutput.setText(line);
+                                });
+                          } catch (Exception ignored) {
+                          }
+                        });
+                handler.post(
+                    () -> {
+                      tuningReport = report;
+                      if (tuningOutput != null) tuningOutput.setText(formatTuning(report));
+                      if (applyTuning != null)
+                        applyTuning.setVisibility(canApplyTuning() ? View.VISIBLE : View.GONE);
+                    });
+              } catch (Exception e) {
+                handler.post(() -> error(e.getMessage()));
+              } finally {
+                tuningRunning = false;
+                tuningEngine = null;
+                handler.post(
+                    () -> {
+                      if (applyTuning != null)
+                        applyTuning.setVisibility(canApplyTuning() ? View.VISIBLE : View.GONE);
+                    });
+              }
+            },
+            "multidns-parameters")
+        .start();
+  }
+
+  private void applyParameters() {
+    if (!canApplyTuning()) {
+      error("Run parameter discovery for the selected profile first.");
+      return;
+    }
+    try {
+      JSONObject report = new JSONObject(tuningReport),
+          copy = new JSONObject(profile().toString()),
+          settings = copy.optJSONObject("resolver_settings");
+      if (settings == null) settings = new JSONObject();
+      JSONObject found = report.getJSONObject("resolver_settings");
+      Iterator<String> keys = found.keys();
+      while (keys.hasNext()) {
+        String endpoint = keys.next();
+        settings.put(endpoint, found.getJSONObject(endpoint));
+      }
+      copy.put("resolver_settings", settings);
+      copy.put("adaptive", true);
+      Mobile.validate(copy.toString());
+      profiles.put(selected, copy);
+      save();
+      tuningProfile = null;
+      diagnostics();
+      toast("Parameters saved for all working resolvers. Reconnect to activate.");
+    } catch (Exception e) {
+      error(e.getMessage());
     }
   }
 
@@ -1432,6 +1968,7 @@ public final class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
+    if (tuningEngine != null) tuningEngine.cancelParameterTest();
     handler.removeCallbacks(refresh);
     super.onDestroy();
   }

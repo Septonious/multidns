@@ -1,118 +1,136 @@
 {
-  "BenchmarkAsymmetricPool": {
-    "upload": {
-      "before_runs": [
-        {
-          "dropped/transfer": 417.0,
-          "probe-p95-ms": 65.52,
-          "queries/transfer": 6471.0,
-          "retries/transfer": 33.0,
-          "seconds": 23.853885624
-        }
-      ],
-      "after_runs": [
-        {
-          "dropped/transfer": 192.0,
-          "probe-p95-ms": 62.72,
-          "queries/transfer": 4276.0,
-          "retries/transfer": 10.0,
-          "seconds": 14.286576555
-        },
-        {
-          "dropped/transfer": 193.0,
-          "probe-p95-ms": 46.67,
-          "queries/transfer": 4407.0,
-          "retries/transfer": 11.0,
-          "seconds": 12.779868767
-        },
-        {
-          "dropped/transfer": 106.0,
-          "probe-p95-ms": 75.88,
-          "queries/transfer": 4226.0,
-          "retries/transfer": 19.0,
-          "seconds": 15.880468759
-        }
-      ],
-      "before_seconds": 23.853885624,
-      "after_median_seconds": 14.286576555,
-      "relative_payload_rate": 1.66967121424563
-    },
-    "download": {
-      "before_runs": [
-        {
-          "dropped/transfer": 119.0,
-          "probe-p95-ms": 49.16,
-          "queries/transfer": 1179.0,
-          "retries/transfer": 3.0,
-          "seconds": 3.190616991
-        }
-      ],
-      "after_runs": [
-        {
-          "dropped/transfer": 1.0,
-          "probe-p95-ms": 61.3,
-          "queries/transfer": 616.0,
-          "retries/transfer": 0.0,
-          "seconds": 2.08095896
-        },
-        {
-          "dropped/transfer": 4.0,
-          "probe-p95-ms": 55.72,
-          "queries/transfer": 592.0,
-          "retries/transfer": 0.0,
-          "seconds": 2.116463959
-        },
-        {
-          "dropped/transfer": 3.0,
-          "probe-p95-ms": 46.43,
-          "queries/transfer": 586.0,
-          "retries/transfer": 0.0,
-          "seconds": 1.617328273
-        }
-      ],
-      "before_seconds": 3.190616991,
-      "after_median_seconds": 2.08095896,
-      "relative_payload_rate": 1.5332435921754077
-    }
+  "baseline_version": "0.2.2",
+  "version": "0.3.0",
+  "baseline": {
+    "BenchmarkAsymmetricPool/upload": [
+      {
+        "seconds": 29.604951659,
+        "MB/s": 0.01,
+        "dropped/transfer": 90.0,
+        "probe-p95-ms": 360.6,
+        "queries/transfer": 4048.0,
+        "retries/transfer": 34.0
+      },
+      {
+        "seconds": 12.030144973,
+        "MB/s": 0.02,
+        "dropped/transfer": 213.0,
+        "probe-p95-ms": 45.84,
+        "queries/transfer": 4352.0,
+        "retries/transfer": 7.0
+      }
+    ],
+    "BenchmarkAsymmetricPool/download": [
+      {
+        "seconds": 1.679272528,
+        "MB/s": 0.16,
+        "dropped/transfer": 6.0,
+        "probe-p95-ms": 46.15,
+        "queries/transfer": 588.0,
+        "retries/transfer": 0.0
+      },
+      {
+        "seconds": 1.731485615,
+        "MB/s": 0.15,
+        "dropped/transfer": 4.0,
+        "probe-p95-ms": 45.52,
+        "queries/transfer": 599.0,
+        "retries/transfer": 0.0
+      }
+    ],
+    "BenchmarkLoadedApplication": [
+      {
+        "seconds": 7.581866879,
+        "MB/s": 0.02,
+        "app-p95-ms": 614.5,
+        "app-samples": 24.0,
+        "peak-path-requests": 21.0,
+        "retries": 0.0
+      },
+      {
+        "seconds": 7.544544483,
+        "MB/s": 0.02,
+        "app-p95-ms": 856.3,
+        "app-samples": 20.0,
+        "peak-path-requests": 22.0,
+        "retries": 0.0
+      }
+    ]
   },
-  "BenchmarkTunnelTransfer": {
-    "upload": {
-      "before_runs": [
-        {
-          "queries/transfer": 1425.0,
-          "retries/transfer": 0.0,
-          "seconds": 2.242522459
-        }
-      ],
-      "after_runs": [
-        {
-          "queries/transfer": 788.0,
-          "retries/transfer": 0.0,
-          "seconds": 1.629074596
-        }
-      ],
-      "before_seconds": 2.242522459,
-      "after_median_seconds": 1.629074596,
-      "relative_payload_rate": 1.3765621687958602
+  "updated": {
+    "BenchmarkAsymmetricPool/upload": [
+      {
+        "seconds": 7.839602769,
+        "MB/s": 0.03,
+        "dropped/transfer": 63.0,
+        "probe-p95-ms": 50.96,
+        "queries/transfer": 3286.0,
+        "retries/transfer": 47.0
+      },
+      {
+        "seconds": 8.38096712,
+        "MB/s": 0.03,
+        "dropped/transfer": 71.0,
+        "probe-p95-ms": 48.33,
+        "queries/transfer": 3389.0,
+        "retries/transfer": 49.0
+      }
+    ],
+    "BenchmarkAsymmetricPool/download": [
+      {
+        "seconds": 1.662518884,
+        "MB/s": 0.16,
+        "dropped/transfer": 4.0,
+        "probe-p95-ms": 47.09,
+        "queries/transfer": 628.0,
+        "retries/transfer": 4.0
+      },
+      {
+        "seconds": 1.499271332,
+        "MB/s": 0.17,
+        "dropped/transfer": 2.0,
+        "probe-p95-ms": 46.27,
+        "queries/transfer": 547.0,
+        "retries/transfer": 0.0
+      }
+    ],
+    "BenchmarkLoadedApplication": [
+      {
+        "seconds": 2.405861415,
+        "MB/s": 0.05,
+        "app-p95-ms": 75.63,
+        "app-samples": 30.0,
+        "peak-path-requests": 13.0,
+        "retries": 0.0
+      },
+      {
+        "seconds": 3.615822252,
+        "MB/s": 0.04,
+        "app-p95-ms": 71.29,
+        "app-samples": 42.0,
+        "peak-path-requests": 13.0,
+        "retries": 17.0
+      }
+    ]
+  },
+  "notes": [
+    "Two final runs per workload. Loopback fixtures, not phone/provider guarantees.",
+    "Asymmetric pool: 8 resolvers in 4 pairs, 44..204 ms path delay, 8-request hard limit, 14 idle streams, 256 KiB byte-verified transfer.",
+    "Loaded application: 4 one-member groups, 4 simultaneous 32 KiB uploads with echo readback, 20 ms base DNS delay and 8 ms additional delay per request above 8 in flight.",
+    "Interactive p95 measures a separate application echo through actual tunnel data admission, not a bypassing control probe.",
+    "XOR was off during throughput benchmarks; obfuscation/MTU/tuner paths are covered separately by race tests.",
+    "Mixed-pool baseline upload varies widely; keep every result and do not infer a fixed resolver capacity from these timings."
+  ],
+  "ratios": {
+    "BenchmarkAsymmetricPool/upload": {
+      "median_speedup": 2.5668084979082573
     },
-    "download": {
-      "before_runs": [
-        {
-          "queries/transfer": 258.0,
-          "retries/transfer": 0.0,
-          "seconds": 0.544132175
-        }
-      ],
-      "after_runs": [
-        {
-          "queries/transfer": 157.0,
-          "retries/transfer": 0.0,
-          "seconds": 0.395528217
-        }
-      ],
-      "before_seconds": 0.544132175,
-      "after_median_seconds": 0.395528217,
-      "relative_payload_rate": 1.3757101304355233
+    "BenchmarkAsymmetricPool/download": {
+      "median_speedup": 1.078742709032407
+    },
+    "BenchmarkLoadedApplication": {
+      "median_speedup": 2.5119903665640364,
+      "median_p95_reduction_percent": 90.01087843350557
     }
   }
 }

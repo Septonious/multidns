@@ -100,3 +100,20 @@ func (c *Client) dataCapacity(op byte) int {
 	}
 	return min(cap(c.dataSlots), capacity)
 }
+
+// Recompute after shared admission: its chosen primary can be outside the
+// originally preferred group, so the old group's RTT is not its hedge timer.
+func (c *Client) hedgeDelay(addr string, op byte, bulk bool) time.Duration {
+	c.adaptiveMu.Lock()
+	defer c.adaptiveMu.Unlock()
+	delay := 100 * time.Millisecond
+	if h := c.health[addr]; h != nil && h.RTTMS > 0 {
+		delay = time.Duration(h.RTTMS+max(h.RTTMS*.5, 4*h.RTTVarianceMS)) * time.Millisecond
+	}
+	if op == opRead {
+		delay += 80 * time.Millisecond
+	} else if !bulk {
+		delay = max(20*time.Millisecond, delay/2)
+	}
+	return min(time.Second, max(20*time.Millisecond, delay))
+}

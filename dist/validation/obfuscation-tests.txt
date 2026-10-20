@@ -1,0 +1,10 @@
+=== RUN   TestXORHasZeroWireOverheadAndAuthenticatesCiphertext
+--- PASS: TestXORHasZeroWireOverheadAndAuthenticatesCiphertext (0.00s)
+=== RUN   TestTunerMeasuresMTUAndConcurrencyWithoutChangingProfile
+--- PASS: TestTunerMeasuresMTUAndConcurrencyWithoutChangingProfile (1.66s)
+=== RUN   TestConfiguredLimitsAndXORTunnelTransfer
+--- PASS: TestConfiguredLimitsAndXORTunnelTransfer (0.71s)
+=== RUN   TestSelectiveACKFreesUploadWorkerBeforePrefixCompletes
+--- PASS: TestSelectiveACKFreesUploadWorkerBeforePrefixCompletes (0.13s)
+PASS
+ok  	github.com/Septonious/multidns/core	3.643s

@@ -18,6 +18,8 @@ type Engine struct {
 	client      *core.Client
 	listener    net.Listener
 	scanCancel  context.CancelFunc
+	tuneCancel  context.CancelFunc
+	tuneStopped bool
 	startCancel context.CancelFunc
 	generation  uint64
 	stopped     bool
@@ -160,3 +162,52 @@ func (e *Engine) TestLatency(profile string, events Events) error {
 	c.TestLatency(ctx, func(h core.ResolverHealth) { b, _ := json.Marshal(h); events.OnEvent(string(b)) })
 	return nil
 }
+
+// FindOptimalParameters uses protected sockets when the VPN is active. Its
+// result contains settings/evidence only; server credentials never enter it.
+func (e *Engine) FindOptimalParameters(profile string, protector Protector, events Events) (string, error) {
+	p, err := core.ParseProfile(profile)
+	if err != nil {
+		return "", err
+	}
+	p.Automatic = false
+	// Ignore saved recommendations while measuring the raw path again.
+	p.ResolverSettings = nil
+	p.Adaptive = false
+	e.mu.Lock()
+	if e.tuneStopped {
+		e.mu.Unlock()
+		now := time.Now()
+		return (core.TuningReport{Started: now, Finished: now, Cancelled: true, Settings: map[string]core.ResolverSettings{}}).JSON(), nil
+	}
+	if e.tuneCancel != nil {
+		e.mu.Unlock()
+		return "", core.ErrTuningBusy
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	e.tuneCancel = cancel
+	e.mu.Unlock()
+	defer func() { cancel(); e.mu.Lock(); e.tuneCancel = nil; e.mu.Unlock() }()
+	c, err := core.NewClientContext(ctx, p, protector)
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+	report := c.FindOptimalParameters(ctx, func(message string) {
+		if events != nil {
+			events.OnEvent(message)
+		}
+	})
+	return report.JSON(), nil
+}
+func (e *Engine) CancelParameterTest() {
+	e.mu.Lock()
+	cancel := e.tuneCancel
+	e.tuneStopped = true
+	e.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func NormalizeResolver(endpoint string) (string, error) { return core.Endpoint(endpoint) }

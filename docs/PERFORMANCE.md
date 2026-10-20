@@ -1,5 +1,74 @@
 # Performance and tuning
 
+## Version 0.3.0: selective upload credits and loaded application latency
+
+The user reported 3.42 Mbit/s download, 0.40 Mbit/s upload, 121 ms unloaded ping,
+and 1028/974 ms loaded ping. Their snapshot had 399 physical timeouts in 84,160
+resolver attempts (~0.47%) and 27 logical retries in 70,250 exchanges (~0.038%).
+All eight paths were full, with 294 additional locally queued requests. Loss
+alone does not explain that backlog or loaded application RTT.
+
+Changes:
+
+- Upload workers now refill on each selective acceptance ACK, independently of
+  the contiguous prefix. An earlier slow/lost chunk no longer idles otherwise
+  free workers. The separate negotiated 64/256 reorder bound and final committed
+  flush barrier preserve ordering, bounded memory and successful Write semantics.
+- Adaptive primaries enter one shared FIFO queue per operation/priority. At
+  admission, work selects a healthy path with room, including outside its original
+  group. Interactive data/head reads have priority, bulk leaves one interactive
+  credit, and waiting uploads reserve half the available read concurrency.
+- A reserved credit already occupied by an interactive read does not block the
+  remaining upload credit. Busy backups are skipped instead of queuing another
+  speculative attempt. Single-member groups keep one unique attempt after global
+  selection; a paired group's hedge delay follows its actual chosen primary.
+- Useful data-exchange RTT above a recent minimum plus the delay target reduces
+  path concurrency before loss. Existing loss feedback and wire-credit retention
+  remain. Speculative windows are capped at 128 upload workers/64 read positions,
+  with the negotiated upload reorder limit enforced independently.
+- The first observed failure quarantines a resolver and unowned queued work
+  redistributes. Single canaries after cooldown and two-second authenticated health
+  checks restore recovered paths. Silent failures still need a timeout/error to
+  become observable. Socket diagnostics now preserve the underlying read error.
+- A new Diagnostics tab provides per-path counters, errors, queue delay and manual
+  settings. Full-size authenticated MTU/TX/RX tests produce evidence and explicitly
+  applied per-resolver recommendations. See [Diagnostics](DIAGNOSTICS.md).
+- Optional XOR payload obfuscation adds no bytes; authentication remains enabled.
+  It does not add TLS or claim confidentiality. Application HTTPS retains its TLS.
+
+Final controlled comparison, two runs each, same host and fixtures:
+
+| Workload | 0.2.2 | 0.3.0 |
+| --- | --- | --- |
+| Asymmetric 256 KiB upload | 29.605 / 12.030 s | 7.840 / 8.381 s |
+| Asymmetric 256 KiB download | 1.679 / 1.731 s | 1.663 / 1.499 s |
+| Four simultaneous upload/echo transfers | 7.582 / 7.545 s | 2.406 / 3.616 s |
+| Loaded **application** echo p95 | 614.5 / 856.3 ms | 75.63 / 71.29 ms |
+
+The asymmetric median upload improves 2.57x in these runs, but the old version's
+upload variance is large. Four-stream median transfer time improves 2.51x; its
+median application echo p95 falls about 90%. Unlike earlier control-only Probe
+measurements, this echo passes through real tunnel data admission during load.
+This still does not establish phone speed or Speedtest loaded RTT. The asymmetric
+fixture remains subject to capacity-discovery loss (47/49 logical upload retries
+in the new runs versus 34/7 old); a new loaded run also had 17 retries. Discovery
+is not loss-free. Tuner recommendations and the user's next real-link test are
+needed to choose stable per-resolver limits.
+
+The mixed pool uses eight resolvers at 44..204 ms, a hard eight-request data
+capacity and fourteen idle streams. The loaded application fixture uses four
+one-member groups, four 32 KiB uploads with byte-verified echo readback, and a
+separate short echo stream. DNS base delay is 20 ms, with 8 ms added per request
+above eight in flight. Both benchmark sources are tracked; raw final runs,
+intermediate runs and machine-readable measurements are in `dist/validation`.
+XOR is off for comparative benchmarks; separate race tests verify obfuscation,
+MTU bounds, corruption rejection, tuner results, cancellation, selective progress,
+independent-path failure/recovery and byte-exact transfers. The full race suite,
+vet and old/new interoperability checks passed. No physical Oppo measurement is
+available from this environment.
+
+Earlier versions below are historical descriptions and limits.
+
 ## Version 0.2.2: useful parallelism and wire occupancy
 
 The user's 0.2.1 snapshot shows 47 logical retries in 71,894 attempts (0.065%),

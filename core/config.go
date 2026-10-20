@@ -21,7 +21,19 @@ type Rule struct {
 	Protocol string `json:"protocol,omitempty"`
 	Action   string `json:"action"`
 }
+
+// ResolverSettings bounds actual in-flight DNS exchanges, not OS threads.
+type ResolverSettings struct {
+	MTU       int `json:"mtu,omitempty"`
+	UploadMTU int `json:"upload_mtu,omitempty"`
+	TXWorkers int `json:"tx_workers,omitempty"`
+	RXWorkers int `json:"rx_workers,omitempty"`
+}
 type Profile struct {
+	ResolverSettings map[string]ResolverSettings `json:"resolver_settings,omitempty"`
+	LatencyTargetMS  int                         `json:"latency_target_ms,omitempty"`
+	Obfuscation      string                      `json:"obfuscation,omitempty"`
+
 	Pool       []string `json:"resolver_pool,omitempty"`
 	Automatic  bool     `json:"automatic_groups"`
 	Adaptive   bool     `json:"adaptive"`
@@ -65,6 +77,33 @@ func (p *Profile) Validate() error {
 			}
 		}
 	}
+	if p.Obfuscation != "" && p.Obfuscation != "none" && p.Obfuscation != "xor" {
+		return fmt.Errorf("obfuscation must be none or xor")
+	}
+	if p.LatencyTargetMS == 0 {
+		p.LatencyTargetMS = 30
+	}
+	if p.LatencyTargetMS < 5 || p.LatencyTargetMS > 500 {
+		return fmt.Errorf("latency target must be 5..500 ms")
+	}
+	normalized := map[string]ResolverSettings{}
+	for addr, settings := range p.ResolverSettings {
+		endpoint, err := Endpoint(addr)
+		if err != nil {
+			return err
+		}
+		if settings.MTU != 0 && (settings.MTU < 512 || settings.MTU > 1232) {
+			return fmt.Errorf("DNS MTU must be 512..1232")
+		}
+		if settings.UploadMTU != 0 && (settings.UploadMTU < 8 || settings.UploadMTU > uploadCapacity(*p)) {
+			return fmt.Errorf("upload payload exceeds DNS name capacity")
+		}
+		if settings.TXWorkers < 0 || settings.TXWorkers > 32 || settings.RXWorkers < 0 || settings.RXWorkers > 32 {
+			return fmt.Errorf("TX/RX workers must be 0 (auto) or 1..32")
+		}
+		normalized[endpoint] = settings
+	}
+	p.ResolverSettings = normalized
 	if len(p.Key) < 16 {
 		return fmt.Errorf("authentication key must contain at least 16 characters")
 	}

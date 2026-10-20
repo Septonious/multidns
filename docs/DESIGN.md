@@ -20,7 +20,8 @@ Base64 TXT costs space but avoids recursive parser differences with arbitrary by
 
 Each group races matching authenticated requests. The first valid response wins;
 late responses cannot consume data twice. A retry rotates groups. The default is
-striping; affinity maps a stream to a group until retry. Resolver endpoint health
+striping; fixed affinity maps a stream to a group until retry. Adaptive scheduling
+uses group preferences while admitting work to available healthy paths. Resolver endpoint health
 is measured independently of the race; cancellation is not a timeout.
 
 Source references examined: SlipGate bf2df191a5da31cd447886c83568f676ebfee342;
@@ -74,3 +75,37 @@ callbacks and closes the TUN before asynchronous engine shutdown/thread joining.
 Startup checks cannot publish a VPN after cancellation. The Go engine's startup
 mutex covers only state publication, and stopping an engine is terminal; a new
 engine is created when reconnecting.
+
+
+## 0.3.0 optional extensions and scheduling
+
+Header and authentication sizes remain 30 + 8 bytes. The high bit of the operation
+byte requests XOR payload obfuscation; authenticate the complete header/ciphertext
+before removing the flag and unmasking. Plain v1 remains the default. This option
+requires a supporting server; it is not a confidentiality mechanism.
+
+`opOpen.Seq >> 8` requests a smaller immutable download chunk size, clamped to
+32..server capacity. Low bits retain queued ACK and extended upload-window
+negotiation. A legacy server ignores the extra bits and falls back to its usual
+chunk size/TCP truncation recovery. Op 9 is a stateless authenticated parameter
+probe: Seq requests 16..768 response bytes, which are deterministically generated
+from nonce/request data using SHA-256 blocks; it opens no destination stream.
+An older server rejects it, so discovery produces no applicable parameters.
+
+Adaptive primary admission uses one shared FIFO queue per operation/priority,
+selecting a free healthy path at admission time. Short data/head reads have
+priority, bulk leaves an interactive credit, and waiting writes reserve half of
+read concurrency. A path's configured TX/RX ceilings and learned combined limit
+all apply. Data RTT inflation above a recent minimum plus the delay target cuts
+capacity before loss; timeouts retain the earlier burst-safe multiplicative cut.
+Primary selection can move outside the preferred group. One-member groups send
+one unique attempt; paired groups can use a delayed spare-capacity hedge whose
+timer follows the actually selected primary. A busy backup is skipped rather
+than creating another pinned queue. Packet loss triggers selective ARQ with a
+fresh nonce; sequence/byte identity and the final upstream flush barrier remain.
+
+In 0.3.0, each selectively accepted upload chunk immediately frees its worker,
+while the next-minus-contiguous-prefix position must still fit the separately
+negotiated reorder bound. Slow or lost chunks retain their ARQ identity without
+idling all fast-path workers. Write returns only after the flush barrier commits
+its full prefix to the destination socket.

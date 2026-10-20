@@ -81,17 +81,30 @@ func (c *Client) socket(ctx context.Context, addr, network string) (*resolverSoc
 		}
 	}
 	c.sockets[key] = s
+	c.adaptiveMu.Lock()
+	h := c.health[addr]
+	if h == nil {
+		h = &ResolverHealth{Endpoint: addr, Healthy: true}
+		c.health[addr] = h
+	}
+	h.Connections++
+	if c.socketOpened[key] {
+		h.Reconnections++
+	}
+	c.socketOpened[key] = true
+	c.adaptiveMu.Unlock()
 	go s.readLoop()
 	return s, nil
 }
-func (s *resolverSocket) close() {
+func (s *resolverSocket) close() { s.closeWithError(net.ErrClosed) }
+func (s *resolverSocket) closeWithError(cause error) {
 	s.once.Do(func() {
 		close(s.done)
 		s.conn.Close()
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		for id, p := range s.pending {
-			s.finishLocked(id, p, nil, net.ErrClosed)
+			s.finishLocked(id, p, nil, cause)
 		}
 	})
 }
@@ -129,6 +142,7 @@ func (s *resolverSocket) readLoop() {
 			}
 		}
 		if e != nil {
+			s.closeWithError(e)
 			return
 		}
 		if !m.Response || len(m.Question) > 1 {
@@ -197,6 +211,9 @@ func (c *Client) exchangeDNSTracked(ctx context.Context, m *dns.Msg, addr, netwo
 		}
 	}()
 	m = m.Copy()
+	if setting := c.Profile.ResolverSettings[addr]; setting.MTU > 0 {
+		m.SetEdns0(uint16(setting.MTU), false)
+	}
 	m.Id = id
 	select {
 	case s.write <- struct{}{}:
@@ -220,7 +237,7 @@ func (c *Client) exchangeDNSTracked(ctx context.Context, m *dns.Msg, addr, netwo
 	e = (&dns.Conn{Conn: s.conn}).WriteMsg(m)
 	<-s.write
 	if e != nil {
-		s.close()
+		s.closeWithError(e)
 		return nil, e, p.done
 	}
 	select {

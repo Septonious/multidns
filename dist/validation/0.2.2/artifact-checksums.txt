@@ -1,0 +1,7 @@
+multidns-client-linux-amd64: OK
+multidns-client-linux-arm64: OK
+multidns-prototype-debug.apk: OK
+multidns-scanner-linux-amd64: OK
+multidns-scanner-linux-arm64: OK
+multidns-server-linux-amd64: OK
+multidns-server-linux-arm64: OK

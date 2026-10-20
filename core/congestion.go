@@ -11,9 +11,13 @@ import (
 // prevent ten busy streams from flooding the same recursive resolver.
 // Admission happens before global slots and before starting an exchange timer.
 type pathState struct {
+	bulk                                     int
+	retryAt                                  time.Time
 	flight, reads, waiting, limit, successes int
 	wake                                     chan struct{}
 	lastCut, lastIdleGrowth                  time.Time
+	minRTT                                   float64
+	baselineAt                               time.Time
 }
 
 func (c *Client) pathLocked(addr string) *pathState {
@@ -23,7 +27,7 @@ func (c *Client) pathLocked(addr string) *pathState {
 	p := c.paths[addr]
 	if p == nil {
 		p = &pathState{limit: min(8, c.Profile.Window), wake: make(chan struct{})}
-		p.limit = max(2, p.limit)
+		p.limit = min(c.pathCeiling(addr), max(2, p.limit))
 		c.paths[addr] = p
 	}
 	return p
@@ -106,10 +110,33 @@ func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error,
 		}
 		return
 	} // Empty long-polls do not prove bulk capacity.
+	// Delay-based control acts before loss, keeping the network queue near
+	// the requested budget. Idle long-polls were excluded above.
+	rtt := float64(elapsed.Microseconds()) / 1000
+	if p.minRTT == 0 || rtt < p.minRTT || now.Sub(p.baselineAt) > 30*time.Second {
+		p.minRTT = rtt
+		p.baselineAt = now
+	}
+	if rtt > p.minRTT+float64(c.Profile.LatencyTargetMS) && now.Sub(p.lastCut) > 300*time.Millisecond {
+		p.limit = max(2, p.limit-max(1, p.limit/5))
+		p.successes = 0
+		p.lastCut = now
+		p.signal()
+		c.wakeAdmissionsLocked()
+		return
+	}
 	p.successes++
-	if p.successes >= 2*p.limit && p.limit < 32 {
+	if p.successes >= 2*p.limit && p.limit < c.pathCeiling(addr) {
 		p.limit++
 		p.successes = 0
 		p.signal()
 	}
+}
+
+func (c *Client) pathCeiling(addr string) int {
+	settings := c.Profile.ResolverSettings[addr]
+	if settings.TXWorkers > 0 && settings.RXWorkers > 0 {
+		return max(2, max(settings.TXWorkers, settings.RXWorkers))
+	}
+	return 32
 }

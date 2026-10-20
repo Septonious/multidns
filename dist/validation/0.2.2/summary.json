@@ -1,0 +1,147 @@
+{
+  "version": "0.2.2",
+  "android_version_code": 6,
+  "baseline": "c609770 (0.2.1)",
+  "changes": [
+    "Unique bulk primary work across group members with delayed backup; controls retain immediate racing",
+    "Capacity/queue/directional-rate weighted scheduling and idle rebalancing",
+    "Track canceled requests until wire completion and retain adaptive leases",
+    "Negotiated 256 upload bound with safe 64 fallback; 64-chunk receive credit including application buffers",
+    "Idle congestion recovery and no repeated reduction for pre-cut requests",
+    "Dark theme and retained signing identity; transport_version, hedges, peer_upload_window and leased wire_in_flight diagnostics"
+  ],
+  "go_race_tests": "Passed full suite: go test -race ./... -count=1 -timeout=150s",
+  "go_vet": "passed",
+  "regression_tests": [
+    "Both group members carry unique bulk chunks without normal duplication",
+    "Dropped primary recovered by hedge before RTO",
+    "Canceled request retains credit until gated late reply",
+    "Negotiated 256-position upload queue bound and ordered flush delivery",
+    "Legacy 64-position bound, consumer backpressure, loss recovery, shutdown/reset, TCP fallback"
+  ],
+  "fixture_changes": "UDP buffers match production 1 MiB; race-instrumented large backpressure/loss test deadlines 20/30s on two CPUs; payload and progress assertions retained",
+  "wire_compatibility": "0.2.2/0.2.1, 0.2.1/0.2.2 and 0.2.2/0.2.2: authenticated byte-verified 32 KiB HTTP upload/download; adaptive enabled",
+  "android": "Build/lint passed (0 errors,20 warnings), both JNI ABIs, six ELF LOAD alignments >=16 KiB, APK ZIP alignment, signature and retained certificate verified",
+  "android_device_test": "No physical Oppo runtime test; no emulator runtime success claimed",
+  "linux": "server,client,scanner CGO-free for linux amd64 and arm64",
+  "performance": {
+    "BenchmarkAsymmetricPool": {
+      "upload": {
+        "before_runs": [
+          {
+            "dropped/transfer": 417.0,
+            "probe-p95-ms": 65.52,
+            "queries/transfer": 6471.0,
+            "retries/transfer": 33.0,
+            "seconds": 23.853885624
+          }
+        ],
+        "after_runs": [
+          {
+            "dropped/transfer": 192.0,
+            "probe-p95-ms": 62.72,
+            "queries/transfer": 4276.0,
+            "retries/transfer": 10.0,
+            "seconds": 14.286576555
+          },
+          {
+            "dropped/transfer": 193.0,
+            "probe-p95-ms": 46.67,
+            "queries/transfer": 4407.0,
+            "retries/transfer": 11.0,
+            "seconds": 12.779868767
+          },
+          {
+            "dropped/transfer": 106.0,
+            "probe-p95-ms": 75.88,
+            "queries/transfer": 4226.0,
+            "retries/transfer": 19.0,
+            "seconds": 15.880468759
+          }
+        ],
+        "before_seconds": 23.853885624,
+        "after_median_seconds": 14.286576555,
+        "relative_payload_rate": 1.66967121424563
+      },
+      "download": {
+        "before_runs": [
+          {
+            "dropped/transfer": 119.0,
+            "probe-p95-ms": 49.16,
+            "queries/transfer": 1179.0,
+            "retries/transfer": 3.0,
+            "seconds": 3.190616991
+          }
+        ],
+        "after_runs": [
+          {
+            "dropped/transfer": 1.0,
+            "probe-p95-ms": 61.3,
+            "queries/transfer": 616.0,
+            "retries/transfer": 0.0,
+            "seconds": 2.08095896
+          },
+          {
+            "dropped/transfer": 4.0,
+            "probe-p95-ms": 55.72,
+            "queries/transfer": 592.0,
+            "retries/transfer": 0.0,
+            "seconds": 2.116463959
+          },
+          {
+            "dropped/transfer": 3.0,
+            "probe-p95-ms": 46.43,
+            "queries/transfer": 586.0,
+            "retries/transfer": 0.0,
+            "seconds": 1.617328273
+          }
+        ],
+        "before_seconds": 3.190616991,
+        "after_median_seconds": 2.08095896,
+        "relative_payload_rate": 1.5332435921754077
+      }
+    },
+    "BenchmarkTunnelTransfer": {
+      "upload": {
+        "before_runs": [
+          {
+            "queries/transfer": 1425.0,
+            "retries/transfer": 0.0,
+            "seconds": 2.242522459
+          }
+        ],
+        "after_runs": [
+          {
+            "queries/transfer": 788.0,
+            "retries/transfer": 0.0,
+            "seconds": 1.629074596
+          }
+        ],
+        "before_seconds": 2.242522459,
+        "after_median_seconds": 1.629074596,
+        "relative_payload_rate": 1.3765621687958602
+      },
+      "download": {
+        "before_runs": [
+          {
+            "queries/transfer": 258.0,
+            "retries/transfer": 0.0,
+            "seconds": 0.544132175
+          }
+        ],
+        "after_runs": [
+          {
+            "queries/transfer": 157.0,
+            "retries/transfer": 0.0,
+            "seconds": 0.395528217
+          }
+        ],
+        "before_seconds": 0.544132175,
+        "after_median_seconds": 0.395528217,
+        "relative_payload_rate": 1.3757101304355233
+      }
+    }
+  },
+  "performance_limit": "Controlled loopback fixture, not phone/provider capacity. One baseline run versus three updated mixed-pool runs. Initial updated upload took 21.489s with probe p95 313ms; retained in performance-first-after.txt. Repeated final uploads 12.780..15.880s and p95 46.67..75.88ms. Timing variability precludes a promised phone multiplier.",
+  "android_apk_sha256": "34491401a34d5c9d3ab25ad3de55e2ae01963fdece190e95962be3fa79c0de95"
+}

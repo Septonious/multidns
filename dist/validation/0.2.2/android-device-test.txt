@@ -1,0 +1,1 @@
+Not run on a physical phone. Build/lint/native checks are not Android VPN runtime validation.

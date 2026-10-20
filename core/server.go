@@ -102,6 +102,9 @@ func (s *Server) ServeDNS(w dns.ResponseWriter, m *dns.Msg) {
 	_ = w.WriteMsg(reply)
 }
 func (s *Server) handle(f frame) []byte {
+	if f.Op == opTune {
+		return tuningData(f)
+	}
 	if f.Op == opProbe {
 		return append([]byte{statusOK}, f.Data...)
 	}
@@ -116,6 +119,9 @@ func (s *Server) handle(f frame) []byte {
 		st = &serverStream{ready: make(chan struct{}), notify: make(chan struct{}), writes: map[uint32][]byte{}, chunks: map[uint32][]byte{}, last: time.Now(), readSize: s.readSize, queuedACK: f.Seq&queuedWriteACK != 0}
 		if st.queuedACK && f.Seq&extendedUploadWindow != 0 {
 			st.writeLimit = largeUploadWindow
+		}
+		if requested := int(f.Seq >> 8); requested > 0 {
+			st.readSize = min(st.readSize, max(32, requested))
 		}
 		s.streams[k] = st
 		go st.open(f.Data)

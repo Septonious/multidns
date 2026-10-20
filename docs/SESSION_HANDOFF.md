@@ -1,3 +1,88 @@
+# Version 0.3.0 — 20 October 2026
+
+Current release: see repository HEAD. Previous published source 4e326f2 / 0.2.2.
+User authorized transport optimization, comprehensive diagnostics/settings and
+parameter discovery, matching APK/Linux builds and GitHub publication. No agents
+were used. Production server updates remain manual; no SSH/key is present here.
+
+Implemented:
+- Shared adaptive admission across all healthy group paths; FIFO per operation /
+  priority, interactive and head-read priority, one bulk-free interactive credit.
+  A head read occupying that credit does not starve the remaining upload slot.
+  Waiting writers reserve half the read budget. Single-member groups remain unique
+  after global selection; paired spare-capacity hedges use the chosen primary RTT.
+- Upload selective ACK frees a sender worker without waiting for the contiguous
+  prefix. Independent 64/256 reorder credit and final upstream flush remain.
+  This is a key upload fix; do not regress it to next-minus-prefix worker counting.
+- Delay-based adaptive capacity cuts in addition to existing loss feedback;
+  default network delay target 30 ms. Speculative upload worker window <=128,
+  reads <=64, independent of negotiated upload reorder bound. Fixed mode retained.
+- First observed error quarantines a resolver; queued work has no path ownership.
+  ARQ moves failed operations to available paths. Canary after 300 ms / authenticated
+  health checks every two seconds restore service. Silent failures still require
+  observable error/timeout. Reconnect and recovery counters are distinct.
+- Full-size stateless authenticated opTune=9; measured DNS MTU and upload payload
+  tests, separate TX/RX concurrency sweeps, loss/loaded-RTT constraints, cancellable
+  report and explicit Apply. App requires VPN/scans stopped for independent tests.
+  Apply merges only successful recommendations into the same unchanged profile,
+  enables adaptive mode, and needs reconnect. Results are estimates, not permanent
+  optima. UI report lasts until activity closes; copy JSON to retain raw results.
+- Per-resolver profile settings: DNS MTU 512..1232, TX/RX 0(auto)..32, upload payload
+  0(auto) or valid domain-dependent size. Worker limits bound in-flight DNS requests.
+  Pool-min chunk limits preserve immutable ARQ/failover compatibility; this can
+  reduce pool payload size if one spare has a small MTU. See DIAGNOSTICS.md.
+- Header remains 30 bytes plus existing HMAC8. Optional XOR uses authenticated
+  operation high bit and a separate nonce-derived SHA256 mask, zero extra bytes.
+  Do not XOR with the authentication key directly. XOR is obfuscation, not secure
+  encryption. HTTPS retains application TLS; MultiDNS adds no TLS layer.
+  New XOR/tuning features require updated server; plaintext default interoperates.
+- Open.Seq high bits request smaller immutable RX chunks; low bits keep existing
+  selective ACK / extended queue negotiation. Older server ignores high bits.
+- New dark Diagnostics tab: all per-resolver error/retry/hedge/connection/recovery/
+  TCP fallback/payload counters, RTT and queue delays, manual settings and complete
+  tuning trial evidence. No server key is copied into diagnostic reports.
+- APK 0.3.0, versionCode7; six Linux amd64/arm64 binaries. Signing identity retained.
+
+Validation: full go test -race ./... and vet passed. Latest mobile cancellation
+and XOR key-separation changes additionally race-tested. Regression coverage adds
+independent-group failure/recovery, exact-byte XOR/MTU transfer, authentication
+rejection, measured MTU/concurrency detection, cancellation before worker startup,
+selective upload advancement while prefix is blocked, and two-credit TX progress
+beside an idle head read. New/old, old/new and new/new endpoints byte-verify 32 KiB
+HTTP upload/download. Android build/lint, native ABI/JNI, signature/certificate and
+16 KiB alignment checks are recorded in dist/validation. Physical Oppo runtime and
+phone throughput remain untested here; do not claim device validation.
+
+Controlled final two-run comparisons (raw data retained, not mobile predictions):
+- Mixed 4x2 pool, 256 KiB upload: old 29.605/12.030s, new 7.840/8.381s;
+  median 2.57x but baseline variance is large. New logical retries 47/49, old34/7.
+- Mixed download: old1.679/1.731s, new1.663/1.499s; modest median1.08x.
+- Four independent one-member groups with four simultaneous 32 KiB upload/echo
+  streams: old7.582/7.545s, new2.406/3.616s; median2.51x.
+- Concurrent short APPLICATION echo p95: old614.5/856.3ms, new75.63/71.29ms,
+  median~90% lower. One new loaded run had17 retries; discovery is not loss-free.
+  This measures tunnel data admission, unlike previous bypassing control probes.
+
+Production remains t.atmosl.ink via ns2.atmosl.ink -> 136.148.220.253. Preserve
+/etc/multidns/server.env and public-IP-only systemd override; systemd-resolved stays
+on loopback. User checkout can be detached: git pull --ff-only origin main.
+Install dist/multidns-server-linux-amd64 atomically over /usr/local/bin/multidns-server,
+restart/status multidns, then install APK over existing app to retain profiles.
+For next phone test use one resolver per group (automatic group_size=1 too),
+adaptive enabled, initial base window8, same pool/network. Parameter discovery is
+available disconnected; review/apply and reconnect before repeating measurement.
+
+Retained toolchain /workspace/toolchains/{go,jdk-21.0.12.1,android}; GOPATH=gopath,
+GOCACHE=cache, ANDROID_USER_HOME=android-user, GRADLE_USER_HOME=gradle-cache,
+GRADLE_OFFLINE=1, MULTIDNS_DEBUG_KEYSTORE=/workspace/toolchains/android-user/debug.keystore.
+APK cert SHA256: 28d3a8d227f63d209bbf4575c128a2546e38e7265e95ec2243886ef5bfbc9c54.
+Never commit/print the private key store or authentication keys. Recovery bundle /
+source archive and /workspace/SESSION_HANDOFF.md are refreshed after publication.
+Scratch validation is moved outside Git to /workspace/work/multidns-0.3.0-validation.
+Baseline source snapshot: /workspace/work/multidns-0.2.2-baseline.
+
+Earlier notes below are historical.
+
 # Version 0.2.2 — 20 October 2026
 
 User reported poor real-phone throughput: 1.25 Mbit/s down / 0.27 Mbit/s up,

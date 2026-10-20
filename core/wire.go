@@ -73,6 +73,8 @@ func downloadCapacity(p Profile) int {
 
 type frame struct {
 	Bulk    bool // local scheduler hint; never serialized
+	Retry   bool // local diagnostic hint
+	XOR     bool // authenticated high bit in operation; no added bytes
 	Op      byte
 	Session uint64
 	Stream  uint32
@@ -86,12 +88,18 @@ func (f frame) pack(key string) []byte {
 	b := make([]byte, headerSize+len(f.Data)+8)
 	b[0] = 1
 	b[1] = f.Op
+	if f.XOR {
+		b[1] |= 0x80
+	}
 	binary.BigEndian.PutUint64(b[2:10], f.Session)
 	binary.BigEndian.PutUint32(b[10:14], f.Stream)
 	binary.BigEndian.PutUint32(b[14:18], f.Seq)
 	binary.BigEndian.PutUint32(b[18:22], f.Ack)
 	binary.BigEndian.PutUint64(b[22:30], f.Nonce)
 	copy(b[30:], f.Data)
+	if f.XOR {
+		xorPayload(b[30:len(b)-8], key, f.Nonce)
+	}
 	h := hmac.New(sha256.New, []byte(key))
 	h.Write(b[:len(b)-8])
 	copy(b[len(b)-8:], h.Sum(nil)[:8])
@@ -106,9 +114,16 @@ func unpack(b []byte, key string) (frame, error) {
 	if !hmac.Equal(h.Sum(nil)[:8], b[len(b)-8:]) {
 		return frame{}, errors.New("authentication failed")
 	}
-	return frame{Op: b[1], Session: binary.BigEndian.Uint64(b[2:10]), Stream: binary.BigEndian.Uint32(b[10:14]), Seq: binary.BigEndian.Uint32(b[14:18]), Ack: binary.BigEndian.Uint32(b[18:22]), Nonce: binary.BigEndian.Uint64(b[22:30]), Data: append([]byte(nil), b[30:len(b)-8]...)}, nil
+	data := append([]byte(nil), b[30:len(b)-8]...)
+	if b[1]&0x80 != 0 {
+		xorPayload(data, key, binary.BigEndian.Uint64(b[22:30]))
+	}
+	return frame{XOR: b[1]&0x80 != 0, Op: b[1] & 0x7f, Session: binary.BigEndian.Uint64(b[2:10]), Stream: binary.BigEndian.Uint32(b[10:14]), Seq: binary.BigEndian.Uint32(b[14:18]), Ack: binary.BigEndian.Uint32(b[18:22]), Nonce: binary.BigEndian.Uint64(b[22:30]), Data: data}, nil
 }
 func query(f frame, p Profile) (*dns.Msg, error) {
+	if p.Obfuscation == "xor" {
+		f.XOR = true
+	}
 	text := strings.ToLower(encoding.EncodeToString(f.pack(p.Key)))
 	labels := []string{}
 	for len(text) > 0 {
@@ -173,4 +188,41 @@ func parseResponse(m *dns.Msg, key string) (frame, error) {
 		}
 	}
 	return frame{}, errors.New("missing tunnel TXT")
+}
+
+// XOR is deliberately only obfuscation. Authentication covers header/ciphertext.
+// The rotating nonce avoids a fixed visual mask; it is not a secure cipher.
+func xorPayload(data []byte, key string, nonce uint64) {
+	// Never repeat the authentication key itself as an XOR mask: known
+	// plaintext would then expose the key used to authenticate every frame.
+	seed := append([]byte("multidns/xor-obfuscation/v1/"+key), make([]byte, 8)...)
+	binary.BigEndian.PutUint64(seed[len(seed)-8:], nonce)
+	mask := sha256.Sum256(seed)
+	for i := range data {
+		data[i] ^= mask[i%len(mask)]
+	}
+}
+
+func (c *Client) readCapacity() int {
+	mtu := 1232
+	for _, addr := range c.Profile.ResolverPool() {
+		if n := c.Profile.ResolverSettings[addr].MTU; n > 0 {
+			mtu = min(mtu, n)
+		}
+	}
+	return downloadCapacityMTU(c.Profile, mtu)
+}
+func downloadCapacityMTU(p Profile, mtu int) int {
+	request, _ := query(frame{Op: opRead}, p)
+	lo, hi := 0, chunkSize
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		packet, err := response(request, frame{Op: opRead, Data: make([]byte, mid+1)}, p.Key).Pack()
+		if err == nil && len(packet) <= mtu {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
 }

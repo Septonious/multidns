@@ -42,13 +42,17 @@ type Client struct {
 	sockets      map[string]*resolverSocket
 	socketsEpoch uint64
 
-	adaptiveMu   sync.Mutex
-	groups       []Group
-	health       map[string]*ResolverHealth
-	paths        map[string]*pathState
-	spares       []string
-	deficits     []float64
-	pathDeficits map[string]float64
+	adaptiveMu       sync.Mutex
+	groups           []Group
+	health           map[string]*ResolverHealth
+	paths            map[string]*pathState
+	spares           []string
+	deficits         []float64
+	pathDeficits     map[string]float64
+	dispatchDeficits map[string]float64
+	admissionWake    chan struct{}
+	admissions       []*admission
+	socketOpened     map[string]bool
 
 	namesMu sync.RWMutex
 	names   map[string]nameEntry
@@ -91,7 +95,14 @@ func NewClientContext(parent context.Context, p Profile, protector Protector) (*
 	// Idle download polls must leave capacity for uploads and control requests.
 	c.readSlots = make(chan struct{}, readBudget)
 	c.dataSlots = make(chan struct{}, dataBudget)
+	c.admissionWake = make(chan struct{})
+	c.socketOpened = map[string]bool{}
 	c.uploadSize = uploadCapacity(p)
+	for _, settings := range p.ResolverSettings {
+		if settings.UploadMTU > 0 {
+			c.uploadSize = min(c.uploadSize, settings.UploadMTU)
+		}
+	}
 	var b [8]byte
 	if _, e := rand.Read(b[:]); e != nil {
 		cancel()
@@ -142,18 +153,20 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{TransportVersion: "0.2.2", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
+	return Stats{TransportVersion: "0.3.0", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
 	spares := append([]string(nil), c.spares...)
+	queued := len(c.admissions)
 	c.adaptiveMu.Unlock()
 	b, _ := json.Marshal(struct {
 		Stats
 		Groups    []Group          `json:"groups"`
 		Resolvers []ResolverHealth `json:"resolvers"`
 		Spares    []string         `json:"spares"`
-	}{c.Stats(), c.groupsSnapshot(), c.healthSnapshot(), spares})
+		Queued    int              `json:"admission_queued"`
+	}{c.Stats(), c.groupsSnapshot(), c.healthSnapshot(), spares, queued})
 	return string(b)
 }
 func freshNonce() uint64 {
@@ -179,6 +192,22 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 	if c.Profile.Adaptive && (f.Op == opRead || f.Op == opWrite) {
 		targets, hedgeDelay = c.bulkTargets(targets, f.Op, f.Bulk)
 	}
+	var primaryRelease func()
+	if c.Profile.Adaptive && (f.Op == opRead || f.Op == opWrite) {
+		var primary string
+		primary, primaryRelease, e = c.acquireAnyPath(ctx, targets, f.Op, f.Bulk)
+		if e != nil {
+			return frame{}, e
+		}
+		backups := []string{}
+		for _, addr := range targets {
+			if len(targets) > 1 && addr != primary {
+				backups = append(backups, addr)
+			}
+		}
+		targets = append([]string{primary}, backups...)
+		hedgeDelay = c.hedgeDelay(primary, f.Op, f.Bulk)
+	}
 	backupNow := make(chan struct{})
 	var startBackups sync.Once
 	results := make(chan result, len(targets))
@@ -200,7 +229,15 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				}
 				timer.Stop()
 			}
-			release, err := c.acquirePath(raceCtx, addr, f.Op)
+			var release func()
+			var err error
+			if index == 0 && primaryRelease != nil {
+				release = primaryRelease
+			} else if index > 0 && primaryRelease != nil {
+				release, err = c.tryPath(addr, f.Op)
+			} else {
+				release, err = c.acquirePath(raceCtx, addr, f.Op)
+			}
 			if err != nil {
 				results <- result{e: err}
 				return
@@ -256,6 +293,16 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			}
 			started := time.Now()
 			c.recordStart(addr)
+			c.adaptiveMu.Lock()
+			if h := c.health[addr]; h != nil {
+				if f.Retry {
+					h.Retransmissions++
+				}
+				if index > 0 && hedgeDelay > 0 {
+					h.Hedges++
+				}
+			}
+			c.adaptiveMu.Unlock()
 			c.queries.Add(1)
 			if index > 0 && hedgeDelay > 0 {
 				c.hedges.Add(1)
@@ -263,6 +310,11 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			r, err, done := c.exchangeDNSTracked(raceCtx, m, addr, "udp")
 			wireDone = done
 			if err == nil && r.Truncated {
+				c.adaptiveMu.Lock()
+				if h := c.health[addr]; h != nil {
+					h.TCPFallbacks++
+				}
+				c.adaptiveMu.Unlock()
 				tcpCtx, tcpCancel := context.WithTimeout(raceCtx, c.exchangeTimeout(addr, f.Op))
 				r, err, wireDone = c.exchangeDNSTracked(tcpCtx, m, addr, "tcp")
 				tcpCancel()
@@ -332,6 +384,7 @@ func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint3
 			f.Ack = ack()
 		}
 		answer, e := c.race(ctx, f, group%len(c.groupsSnapshot()))
+		f.Retry = false
 		if e == nil {
 			switch answer.Data[0] {
 			case statusOK:
@@ -362,7 +415,9 @@ func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint3
 				return nil, net.ErrClosed
 			}
 			c.retries.Add(1)
-			group++
+			f.Retry = true
+			group = c.chooseGroup(group+1, f.Bulk, f.Op)
+			delay = time.Millisecond
 		}
 		timer := time.NewTimer(delay)
 		select {
@@ -411,7 +466,7 @@ func (c *Client) DialContext(ctx context.Context, network, address string) (net.
 	if network == "udp" {
 		data = []byte("udp:" + address)
 	}
-	opened, e := c.rpc(ctx, frame{Op: opOpen, Stream: id, Seq: queuedWriteACK | extendedUploadWindow, Data: data}, base)
+	opened, e := c.rpc(ctx, frame{Op: opOpen, Stream: id, Seq: queuedWriteACK | extendedUploadWindow | uint32(c.readCapacity())<<8, Data: data}, base)
 	if e != nil {
 		return nil, e
 	}
@@ -492,7 +547,8 @@ func (s *Conn) window(operation ...byte) int {
 		return base
 	}
 	grown := base << min(5, int(traffic/4096))
-	return min(ceiling, max(base, min(grown, s.client.dataCapacity(op))))
+	// Bound speculative work per stream; shared admission handles the pool.
+	return min(ceiling, max(base, min(grown, min(128, s.client.dataCapacity(op)))))
 }
 
 func (s *Conn) opContext(read bool) (context.Context, context.CancelFunc) {
@@ -527,7 +583,7 @@ func (s *Conn) prefetch() {
 			// chunks wait for progress before trying again, avoiding N*window
 			// background polls on HTTP keepalive and upload-only connections.
 			b, err := s.client.rpcACK(ctx, frame{Op: opRead, Stream: s.id, Seq: seq,
-				Bulk: s.traffic.Load() >= 4096}, s.group(seq, opRead), s.readSeq.Load, seq != epoch)
+				Bulk: s.traffic.Load() >= 4096 && seq != epoch}, s.group(seq, opRead), s.readSeq.Load, seq != epoch)
 			results <- completion{seq, epoch, readResult{b, err}}
 		}()
 	}
@@ -633,10 +689,12 @@ func (s *Conn) Write(b []byte) (int, error) {
 	window := s.window(opWrite)
 	results := make(chan completion, largeUploadWindow)
 	pending := make(map[int]completion, window)
-	next, acknowledged, offset, total := 0, 0, 0, 0
+	next, acknowledged, completed, offset, total := 0, 0, 0, 0, 0
 	for offset < len(b) || acknowledged < next {
 		window = s.window(opWrite)
-		for offset < len(b) && next-acknowledged < window {
+		// A selective ACK frees a worker even when an earlier chunk is still
+		// on a slower path. Retain the independent negotiated reorder bound.
+		for offset < len(b) && next-completed < window && next-acknowledged < max(64, s.writeLimit) {
 			size := min(capacity, len(b)-offset)
 			data := append([]byte(nil), b[offset:offset+size]...)
 			index, seq := next, s.writeSeq
@@ -650,6 +708,7 @@ func (s *Conn) Write(b []byte) (int, error) {
 		}
 		select {
 		case result := <-results:
+			completed++
 			pending[result.index] = result
 		case <-ctx.Done():
 			return total, ctx.Err()

@@ -127,6 +127,12 @@ final class Ui {
         canvas.drawLine(12, 7, 12, 17, p);
         canvas.drawLine(7, 12, 17, 12, p);
         canvas.drawCircle(12, 12, 3, p);
+      } else if (kind == 3) {
+        canvas.drawLine(4, 20, 4, 4, p);
+        canvas.drawLine(4, 20, 21, 20, p);
+        canvas.drawLine(8, 16, 8, 11, p);
+        canvas.drawLine(13, 16, 13, 6, p);
+        canvas.drawLine(18, 16, 18, 9, p);
       } else {
         canvas.drawLine(5, 6, 19, 6, p);
         canvas.drawLine(5, 18, 19, 18, p);
