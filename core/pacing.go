@@ -9,12 +9,26 @@ import (
 // once. Short writes and controls bypass the pacer. Leases remain held while
 // pacing, so scheduled packets cannot run ahead of the shared credit budget.
 func (c *Client) paceUpload(ctx context.Context, addr string) error {
+	return c.paceData(ctx, addr, opWrite)
+}
+
+func (c *Client) paceData(ctx context.Context, addr string, op byte) error {
 	if !c.Profile.Adaptive {
 		return nil
 	}
 	c.adaptiveMu.Lock()
 	p := c.pathLocked(addr)
 	rtt := p.txRTT
+	next, capacity := &p.nextSend, max(2, p.limit)
+	if p.preferTCP {
+		capacity = min(capacity, 4)
+	}
+	if op == opRead {
+		next, capacity = &p.rx.nextSend, c.readLimitLocked(p)
+		if p.rx.rtt > 0 && time.Since(p.rx.checked) < 10*time.Second {
+			rtt = p.rx.rtt
+		}
+	}
 	if rtt == 0 {
 		if h := c.health[addr]; h != nil {
 			rtt = h.RTTMS
@@ -24,15 +38,15 @@ func (c *Client) paceUpload(ctx context.Context, addr string) error {
 		c.adaptiveMu.Unlock()
 		return nil
 	}
-	interval := max(100*time.Microsecond, time.Duration(rtt*float64(time.Millisecond)/float64(max(2, p.limit))))
+	interval := max(100*time.Microsecond, time.Duration(rtt*float64(time.Millisecond)/float64(capacity)))
 	now := time.Now()
-	at := p.nextSend
+	at := *next
 	if at.Before(now) {
 		at = now
 	}
 	// Canceled sends leave a small gap, never a growing queue of future slots.
 	at = minTime(at, now.Add(time.Duration(rtt*float64(time.Millisecond))))
-	p.nextSend = at.Add(interval)
+	*next = at.Add(interval)
 	delay := at.Sub(now)
 	c.adaptiveMu.Unlock()
 	if delay > 0 {
@@ -49,7 +63,7 @@ func (c *Client) paceUpload(ctx context.Context, addr string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !c.diagnostics.Load() {
+	if !c.diagnostics.Load() || op != opWrite {
 		return nil
 	}
 	c.adaptiveMu.Lock()

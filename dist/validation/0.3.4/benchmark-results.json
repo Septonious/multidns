@@ -1,0 +1,130 @@
+[
+  {
+    "file": "pool-capacity-before.txt",
+    "case": "BenchmarkPoolCapacity/paths-8-2",
+    "seconds": 16.3596,
+    "upload_mbps": 1.0255,
+    "metrics": {
+      "app-max-ms": 231.6,
+      "app-p95-ms": 149.6,
+      "app-p99-ms": 208.4,
+      "app-samples": 135.0,
+      "peak-data-flight": 240.0,
+      "queries": 22345.0,
+      "retries": 4.0,
+      "timeouts": 4.0
+    }
+  },
+  {
+    "file": "pool-capacity-before.txt",
+    "case": "BenchmarkPoolCapacity/paths-20-2",
+    "seconds": 15.1709,
+    "upload_mbps": 1.1059,
+    "metrics": {
+      "app-max-ms": 325.4,
+      "app-p95-ms": 121.6,
+      "app-p99-ms": 140.0,
+      "app-samples": 134.0,
+      "peak-data-flight": 228.0,
+      "queries": 22018.0,
+      "retries": 1.0,
+      "timeouts": 1.0
+    }
+  },
+  {
+    "file": "pool-release-final.txt",
+    "case": "BenchmarkPoolCapacity/paths-8-2",
+    "seconds": 4.6051,
+    "upload_mbps": 3.6432,
+    "metrics": {
+      "app-max-ms": 132.5,
+      "app-p95-ms": 126.1,
+      "app-p99-ms": 130.1,
+      "app-samples": 41.0,
+      "peak-data-flight": 476.0,
+      "queries": 19754.0,
+      "retries": 0.0,
+      "timeouts": 0.0
+    }
+  },
+  {
+    "file": "pool-release-final.txt",
+    "case": "BenchmarkPoolCapacity/paths-8-2",
+    "seconds": 4.6538,
+    "upload_mbps": 3.6051,
+    "metrics": {
+      "app-max-ms": 138.5,
+      "app-p95-ms": 104.9,
+      "app-p99-ms": 128.0,
+      "app-samples": 43.0,
+      "peak-data-flight": 455.0,
+      "queries": 19872.0,
+      "retries": 0.0,
+      "timeouts": 0.0
+    }
+  },
+  {
+    "file": "pool-release-final.txt",
+    "case": "BenchmarkPoolCapacity/paths-20-2",
+    "seconds": 4.59,
+    "upload_mbps": 3.6552,
+    "metrics": {
+      "app-max-ms": 144.1,
+      "app-p95-ms": 113.8,
+      "app-p99-ms": 126.5,
+      "app-samples": 42.0,
+      "peak-data-flight": 512.0,
+      "queries": 19869.0,
+      "retries": 0.0,
+      "timeouts": 3.0
+    }
+  },
+  {
+    "file": "pool-release-final.txt",
+    "case": "BenchmarkPoolCapacity/paths-20-2",
+    "seconds": 4.0628,
+    "upload_mbps": 4.1295,
+    "metrics": {
+      "app-max-ms": 145.1,
+      "app-p95-ms": 124.7,
+      "app-p99-ms": 125.5,
+      "app-samples": 37.0,
+      "peak-data-flight": 512.0,
+      "queries": 19730.0,
+      "retries": 0.0,
+      "timeouts": 0.0
+    }
+  },
+  {
+    "file": "upload-release-final.txt",
+    "case": "BenchmarkUploadLoadedRTT/queue-false-2",
+    "seconds": 3.0165,
+    "upload_mbps": 1.3905,
+    "metrics": {
+      "app-max-ms": 261.3,
+      "app-p95-ms": 114.7,
+      "app-p99-ms": 129.7,
+      "app-samples": 27.0,
+      "peak-data-flight": 162.0,
+      "queries": 5606.0,
+      "retries": 65.0,
+      "timeouts": 66.0
+    }
+  },
+  {
+    "file": "upload-release-final.txt",
+    "case": "BenchmarkUploadLoadedRTT/queue-true-2",
+    "seconds": 6.0136,
+    "upload_mbps": 0.6975,
+    "metrics": {
+      "app-max-ms": 228.4,
+      "app-p95-ms": 193.8,
+      "app-p99-ms": 227.5,
+      "app-samples": 39.0,
+      "peak-data-flight": 110.0,
+      "queries": 5924.0,
+      "retries": 85.0,
+      "timeouts": 87.0
+    }
+  }
+]

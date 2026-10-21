@@ -1,3 +1,67 @@
+# Version 0.3.5 — 21 October 2026
+
+Previous checkpoint: b93d06c / 0.3.4. User reports 14.8/3.12 and 16.0/3.66 Mbps,
+636/210 ms download-loaded RTT, poorer singles than pairs and post-test resolver
+instability. Their 0.3.4 JSON is truncated. User also explicitly requested UDP/53
+preference with TCP/53 operation when UDP is blocked.
+
+Implemented:
+- Continuous bounded SOCKS upload selective-ACK pipeline across local TCP reads;
+  remove the per-buffer flush/drain barrier. Public Conn.Write keeps its flush
+  guarantee. Half-close verifies the full committed prefix. Source buffering is
+  bounded to three 32 KiB blocks plus negotiated reorder workers.
+- Separate RX loss/delay controller and download pacing. Read loss no longer
+  shrinks reliable upload capacity or pauses uploads. Shared physical credits,
+  upload ACK delay control, 512 data / 160 read ceilings remain. Eight global
+  credits and one position on larger UDP paths remain for interactive work.
+- One opportunistic global data backup, including single-resolver groups, without
+  overtaking queued unique work. Pending work remains unowned until admission.
+  Per-chunk adaptive group-weight work is removed from the global scheduling path.
+- Batch timeout expirations do not alone mark down a path: require a sustained
+  failure episode in addition to no authenticated progress. One failed post-load
+  health cycle is tolerated; two failed cycles confirm an idle outage. Successful
+  probes reset the no-progress episode. Canceled probe runs cannot publish failure.
+- UDP-first authenticated TCP fallback for startup, genuine UDP unavailability and
+  TC. TCP mode has separate control/RX/four TX connections, one physical RPC per
+  connection; TCP cap four writes/one read supports sequential recursive frontends.
+  Connections are protected/reused. Periodic UDP canary (~10 s even while busy)
+  restores UDP; stale TCP replies cannot undo that recovery. Timing resets on mode
+  changes. Failed UDP+TCP probe pairs stop early so dead candidates do not starve
+  later healthy candidates in large startup/recovery sweeps.
+- TCP-only scanner discovery, RTT excluding initial fallback delay. Live cards show
+  UDP/TCP and correct singular stream wording; optional debug adds transport switch,
+  UDP failure and TX/RX capacity/cut fields. Capture remains off by default.
+- Wire bytes, HMAC, XOR, profiles and keys unchanged; 0.3.0–0.3.4 server compatible.
+  Android version 0.3.5 / code 12, original retained signing key and C-only HEV bridge.
+
+Validation notes:
+- Full exact-source race suite passed (49.194 s core, packages serialized), as
+  did the earlier 45.879 s suite. Two repeats of final
+  TCP/fallback/streaming/cancellation tests passed, followed by vet. New tests cover
+  blocked UDP, sequential TCP delay/reuse, authenticated recovery, stale response
+  ordering, scanner, physical serial credits, fragmented source/half-close digest,
+  idle source-reader cancellation, RX/TX isolation, delay guard and timeout batches.
+- Eight final SOCKS transitions: 8/20 paths, singles/pairs, SHA-verified downloads
+  then uploads then quiet recovery, application echoes, eight idle sessions,
+  downstream loss/queueing. Upload 2.07–3.22 Mbps vs 0.3.4 1.85–2.31 Mbps; final echo
+  maxima 129.5–414.2 ms, zero health-downs. One pair run still 83 timeouts/61 retries.
+  See docs/PERFORMANCE.md full table; not physical phone proof or worst-case bound.
+- Preserve intermediate evidence: streaming candidate 697.8 ms/6–8 downs; intermittent
+  full-suite collapsed HTTPS timeout, one of six isolated repeats failed then three
+  passed; next full suite failed loaded control p95 and dormant tuner timing. A
+  common cause was not established. Do not claim these are proven solved by the
+  health dwell change or discard failures because a later complete suite passed.
+- No physical Oppo, native VPN lifecycle or real-radio RTT measurement on this host.
+  Native UI rendering/lint/build, APK identity/16 KiB checks and old/new byte-verified
+  CLI compatibility evidence live in dist/validation after artifact build.
+
+Production t.atmosl.ink -> ns2.atmosl.ink -> 136.148.220.253. Preserve env and public-IP
+systemd override. Server update is optional for parity; existing server listens on
+UDP and TCP. Work, raw logs, baseline source and build env retained outside Git in
+/workspace/work/multidns-0.3.5-validation and /workspace/work/multidns-0.3.4-baseline.
+
+---
+
 # Version 0.3.4 — 21 October 2026 (Moscow)
 
 Release source: repository HEAD; previous published checkpoint 612c04b / 0.3.3.

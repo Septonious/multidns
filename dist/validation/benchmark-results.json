@@ -1,130 +1,188 @@
-[
-  {
-    "file": "pool-capacity-before.txt",
-    "case": "BenchmarkPoolCapacity/paths-8-2",
-    "seconds": 16.3596,
-    "upload_mbps": 1.0255,
-    "metrics": {
-      "app-max-ms": 231.6,
-      "app-p95-ms": 149.6,
-      "app-p99-ms": 208.4,
-      "app-samples": 135.0,
-      "peak-data-flight": 240.0,
-      "queries": 22345.0,
-      "retries": 4.0,
-      "timeouts": 4.0
+{
+  "baseline_commit": "b93d06c2a193773a689ada9f08b4765c6dda04a7",
+  "baseline": [
+    {
+      "name": "BenchmarkPoolTransitions/paths-8/group-1-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 7949087626.0,
+        "app-max-ms": 396.1,
+        "app-p95-ms": 215.2,
+        "app-samples": 80.0,
+        "download-Mbps": 2.744,
+        "health-downs": 0.0,
+        "retries": 20.0,
+        "timeouts": 23.0,
+        "upload-Mbps": 1.871
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-8/group-2-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 6841139735.0,
+        "app-max-ms": 228.5,
+        "app-p95-ms": 142.3,
+        "app-samples": 75.0,
+        "download-Mbps": 3.648,
+        "health-downs": 0.0,
+        "retries": 2.0,
+        "timeouts": 3.0,
+        "upload-Mbps": 1.855
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-20/group-1-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 5550064673.0,
+        "app-max-ms": 380.4,
+        "app-p95-ms": 94.85,
+        "app-samples": 65.0,
+        "download-Mbps": 4.445,
+        "health-downs": 0.0,
+        "retries": 14.0,
+        "timeouts": 18.0,
+        "upload-Mbps": 2.314
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-20/group-2-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 4622928171.0,
+        "app-max-ms": 320.6,
+        "app-p95-ms": 147.5,
+        "app-samples": 53.0,
+        "download-Mbps": 7.14,
+        "health-downs": 0.0,
+        "retries": 0.0,
+        "timeouts": 1.0,
+        "upload-Mbps": 2.199
+      }
     }
-  },
-  {
-    "file": "pool-capacity-before.txt",
-    "case": "BenchmarkPoolCapacity/paths-20-2",
-    "seconds": 15.1709,
-    "upload_mbps": 1.1059,
-    "metrics": {
-      "app-max-ms": 325.4,
-      "app-p95-ms": 121.6,
-      "app-p99-ms": 140.0,
-      "app-samples": 134.0,
-      "peak-data-flight": 228.0,
-      "queries": 22018.0,
-      "retries": 1.0,
-      "timeouts": 1.0
+  ],
+  "release": [
+    {
+      "name": "BenchmarkPoolTransitions/paths-8/group-1-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 6270676370.0,
+        "app-max-ms": 280.0,
+        "app-p95-ms": 148.5,
+        "app-samples": 69.0,
+        "download-Mbps": 3.048,
+        "health-downs": 0.0,
+        "retries": 0.0,
+        "timeouts": 4.0,
+        "upload-Mbps": 2.936
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-8/group-1-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 5764618879.0,
+        "app-max-ms": 233.7,
+        "app-p95-ms": 117.8,
+        "app-samples": 69.0,
+        "download-Mbps": 3.616,
+        "health-downs": 0.0,
+        "retries": 2.0,
+        "timeouts": 3.0,
+        "upload-Mbps": 2.753
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-8/group-2-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 5837635495.0,
+        "app-max-ms": 271.0,
+        "app-p95-ms": 140.0,
+        "app-samples": 65.0,
+        "download-Mbps": 3.396,
+        "health-downs": 0.0,
+        "retries": 0.0,
+        "timeouts": 2.0,
+        "upload-Mbps": 2.95
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-8/group-2-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 6997720484.0,
+        "app-max-ms": 414.2,
+        "app-p95-ms": 135.9,
+        "app-samples": 77.0,
+        "download-Mbps": 3.174,
+        "health-downs": 0.0,
+        "retries": 61.0,
+        "timeouts": 83.0,
+        "upload-Mbps": 2.074
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-20/group-1-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 3849665067.0,
+        "app-max-ms": 181.8,
+        "app-p95-ms": 109.0,
+        "app-samples": 49.0,
+        "download-Mbps": 6.637,
+        "health-downs": 0.0,
+        "retries": 0.0,
+        "timeouts": 0.0,
+        "upload-Mbps": 3.22
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-20/group-1-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 4260112808.0,
+        "app-max-ms": 198.9,
+        "app-p95-ms": 119.2,
+        "app-samples": 52.0,
+        "download-Mbps": 6.893,
+        "health-downs": 0.0,
+        "retries": 0.0,
+        "timeouts": 0.0,
+        "upload-Mbps": 2.584
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-20/group-2-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 4158183682.0,
+        "app-max-ms": 129.5,
+        "app-p95-ms": 102.8,
+        "app-samples": 55.0,
+        "download-Mbps": 6.802,
+        "health-downs": 0.0,
+        "retries": 2.0,
+        "timeouts": 2.0,
+        "upload-Mbps": 2.726
+      }
+    },
+    {
+      "name": "BenchmarkPoolTransitions/paths-20/group-2-2",
+      "iterations": 1,
+      "metrics": {
+        "ns/op": 4490479819.0,
+        "app-max-ms": 234.3,
+        "app-p95-ms": 173.6,
+        "app-samples": 50.0,
+        "download-Mbps": 6.927,
+        "health-downs": 0.0,
+        "retries": 3.0,
+        "timeouts": 4.0,
+        "upload-Mbps": 2.353
+      }
     }
-  },
-  {
-    "file": "pool-release-final.txt",
-    "case": "BenchmarkPoolCapacity/paths-8-2",
-    "seconds": 4.6051,
-    "upload_mbps": 3.6432,
-    "metrics": {
-      "app-max-ms": 132.5,
-      "app-p95-ms": 126.1,
-      "app-p99-ms": 130.1,
-      "app-samples": 41.0,
-      "peak-data-flight": 476.0,
-      "queries": 19754.0,
-      "retries": 0.0,
-      "timeouts": 0.0
-    }
-  },
-  {
-    "file": "pool-release-final.txt",
-    "case": "BenchmarkPoolCapacity/paths-8-2",
-    "seconds": 4.6538,
-    "upload_mbps": 3.6051,
-    "metrics": {
-      "app-max-ms": 138.5,
-      "app-p95-ms": 104.9,
-      "app-p99-ms": 128.0,
-      "app-samples": 43.0,
-      "peak-data-flight": 455.0,
-      "queries": 19872.0,
-      "retries": 0.0,
-      "timeouts": 0.0
-    }
-  },
-  {
-    "file": "pool-release-final.txt",
-    "case": "BenchmarkPoolCapacity/paths-20-2",
-    "seconds": 4.59,
-    "upload_mbps": 3.6552,
-    "metrics": {
-      "app-max-ms": 144.1,
-      "app-p95-ms": 113.8,
-      "app-p99-ms": 126.5,
-      "app-samples": 42.0,
-      "peak-data-flight": 512.0,
-      "queries": 19869.0,
-      "retries": 0.0,
-      "timeouts": 3.0
-    }
-  },
-  {
-    "file": "pool-release-final.txt",
-    "case": "BenchmarkPoolCapacity/paths-20-2",
-    "seconds": 4.0628,
-    "upload_mbps": 4.1295,
-    "metrics": {
-      "app-max-ms": 145.1,
-      "app-p95-ms": 124.7,
-      "app-p99-ms": 125.5,
-      "app-samples": 37.0,
-      "peak-data-flight": 512.0,
-      "queries": 19730.0,
-      "retries": 0.0,
-      "timeouts": 0.0
-    }
-  },
-  {
-    "file": "upload-release-final.txt",
-    "case": "BenchmarkUploadLoadedRTT/queue-false-2",
-    "seconds": 3.0165,
-    "upload_mbps": 1.3905,
-    "metrics": {
-      "app-max-ms": 261.3,
-      "app-p95-ms": 114.7,
-      "app-p99-ms": 129.7,
-      "app-samples": 27.0,
-      "peak-data-flight": 162.0,
-      "queries": 5606.0,
-      "retries": 65.0,
-      "timeouts": 66.0
-    }
-  },
-  {
-    "file": "upload-release-final.txt",
-    "case": "BenchmarkUploadLoadedRTT/queue-true-2",
-    "seconds": 6.0136,
-    "upload_mbps": 0.6975,
-    "metrics": {
-      "app-max-ms": 228.4,
-      "app-p95-ms": 193.8,
-      "app-p99-ms": 227.5,
-      "app-samples": 39.0,
-      "peak-data-flight": 110.0,
-      "queries": 5924.0,
-      "retries": 85.0,
-      "timeouts": 87.0
-    }
-  }
-]
+  ],
+  "note": "Controlled local SOCKS download/upload/idle transition fixture, not phone or production resolver measurement."
+}

@@ -142,7 +142,14 @@ func (c *Client) handleSOCKS(conn net.Conn) {
 	remote.SetDeadline(time.Time{})
 	done := make(chan struct{})
 	go func() {
-		io.Copy(remote, conn)
+		if tunnel, ok := remote.(*Conn); ok && tunnel.queuedACK {
+			// Each accepted byte is already in the bounded server reorder queue.
+			// A flush after every local TCP read adds a DNS RTT per ~32KiB and
+			// stalls the next batch. Half-close below is the final commit barrier.
+			tunnel.copyUpload(conn)
+		} else {
+			io.Copy(remote, conn)
+		}
 		if cw, ok := remote.(interface{ CloseWrite() error }); ok {
 			cw.CloseWrite()
 		}

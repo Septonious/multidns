@@ -1,4 +1,4 @@
-# Resolvers and diagnostics (0.3.4)
+# Resolvers and diagnostics (0.3.5)
 
 ## Automatic transport
 
@@ -14,12 +14,43 @@ fallbacks temporarily remove that path from reads while preserving uploads;
 an empty WAIT reply cannot clear this directional cooldown. Immutable chunks
 and sequence numbers are preserved when a request moves to another resolver.
 
-A resolver can learn up to 64 total in-flight exchanges, with at most 32 reads.
-Global data credits scale from 240 to a bounded 512; reads remain capped at 160.
-Credits are reserved in the shared fair queue before assigning a resolver, and
-only the selected waiter is awakened when a credit is freed. Per-path pacing
-and the loaded RTT controller remain active. A tested 1024-credit candidate
-caused severe local latency/CPU regressions and is not shipped.
+UDP paths can learn up to 64 total in-flight exchanges and 32 reads. TX and RX
+have independent loss/delay feedback. A timed-out download briefly pauses new
+reads on that path; reliable uploads remain eligible. Full download replies
+feed a separate smoothed-delay guard with room for the server's 80 ms wait.
+Bulk download requests are paced as well as uploads. Empty WAITs are not a
+congestion sample; an old collapsed startup floor can recover cautiously when
+real queued work is starved.
+
+Global data credits remain bounded at 512, with at most 160 reads. Eight global
+credits and one position on larger UDP windows remain available to interactive
+work. Real wire leases survive cancellation until completion or timeout. A
+waiting unique chunk has no resolver owner, so removing a failed path spreads
+waiting work over the remaining pool. A single opportunistic delayed backup can
+use a different live resolver regardless of group size, without overtaking
+queued unique work. Groups do not multiply physical resolver capacity.
+
+SOCKS uploads retain a continuous selective-ACK pipeline across local TCP reads.
+The source queue is bounded to three 32 KiB blocks plus the negotiated reorder
+window. No per-buffer flush is added; half-close remains the final server-commit
+barrier. The public Conn.Write API retains its existing flush guarantee.
+
+### UDP/53 preference and TCP/53 fallback
+
+Startup E2E probes try UDP first, then TCP if UDP is unavailable. The chosen
+transport is learned only from an authenticated tunnel reply. Occasional lost
+UDP data packets with other recent UDP progress use ARQ across the pool and do
+not force TCP. Truncated UDP answers still use TCP without changing the preferred
+transport for small requests.
+
+TCP uses protected reusable connections, with separate control, download and
+four bounded upload connections. Each connection admits one physical request
+at a time to support sequential DNS TCP frontends; one download long-poll and
+at most four upload requests can be assigned per TCP resolver. TCP preference
+gets a UDP canary about every ten seconds, even while active. Authenticated UDP
+recovery resets the timing clock. Old TCP replies cannot undo a newer UDP recovery.
+The scanner also discovers TCP-only authenticated resolvers and reports their
+actual exchange RTT, excluding the initial UDP failure delay.
 
 The default loaded RTT budget is 500 ms. This is feedback guidance, not a
 worst-case guarantee on Internet, destination, VPN-stack or recovery latency.
@@ -43,16 +74,20 @@ During a connection, the test interface is replaced by slim resolver cards:
 
 - IP and current estimated DNS transport RTT, preferring fresh upload ACK timing
   so the server's deliberate idle-read wait does not inflate the displayed RTT.
-- Current unique stream count on that resolver's outstanding assignments.
+- Current transport (UDP or TCP) and unique stream count on outstanding assignments.
   Several chunks or directions of the same stream count once. Striping can
   place one stream on multiple resolvers; counts need not sum to global streams.
 - Green: reachable/active. Yellow: checking, standby, recent loss or degraded
   read/delay behavior. Red: confirmed unavailable.
 
-One lost exchange briefly pauses new assignments for 25..100 ms and redistributes
-waiting work. It does not toggle reachability. Three consecutive failures with
-no authenticated progress for max(150 ms,3*RTT) open the circuit; a successful
-authenticated exchange restores it. Already-sent requests rely on ARQ timeouts
+One lost exchange briefly pauses the affected direction for 25..100 ms and
+redistributes waiting work. It does not toggle reachability. Three consecutive failures with
+no authenticated progress for max(150 ms,3*RTT), spanning at least another
+150 ms failure episode, open the circuit; a successful authenticated exchange
+restores it. A batch of simultaneous expirations does not count as a sustained
+outage. Idle health probes require two failed maintenance cycles to mark a
+previously reachable resolver down. Cancellation cannot publish a false failed
+probe result. Already-sent requests rely on ARQ timeouts
 or observed errors; silent failure cannot be detected instantly.
 
 Busy paths use recent authenticated traffic for health instead of repeatedly
@@ -78,7 +113,10 @@ capture periods. The last captured report remains available after disconnect.
 
 Debug fields include attempts/replies, TX/RX timeouts, ARQ retries and backups,
 DNS/invalid/socket errors, socket connections/reconnections, confirmed outages
-(`health_downs`), recoveries, capacity cuts and directional cooldowns.
+(`health_downs`), recoveries, capacity cuts and directional cooldowns. `transport`, `transport_switches`,
+`udp_timeouts`, `udp_socket_errors`, `tx_capacity`, `rx_capacity`,
+`rx_capacity_loss_cuts` and `rx_capacity_delay_cuts` expose the independent
+controllers and transport fallback.
 `assigned_streams` is the resolver's unique outstanding stream count.
 `queue_ms` covers shared admission; `slot_wait_ms` covers pre-send credit/pacing
 wait after selection. RTT excludes both local waits. `data_budget`,
@@ -86,8 +124,8 @@ wait after selection. RTT excludes both local waits. `data_budget`,
 
 `session_seconds` permits session-average rates including idle time. Per-resolver
 `goodput_bytes_per_second` and upload/download rate fields are per-exchange
-service estimates, not aggregate measured link throughput. Recent loss covers
-128 observed data outcomes and excludes canceled races. Timeouts count attempts,
+service estimates, not aggregate measured link throughput. Recent upload loss covers
+128 observed TX outcomes and excludes canceled races. Timeouts count attempts,
 not entire VPN disconnects. Socket reconnections are distinct from health recovery.
 
 ## Wire overhead and TLS

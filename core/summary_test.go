@@ -105,6 +105,7 @@ func TestResolverCardStateDistinguishesUnknownLossAndConfirmedOutage(t *testing.
 	}
 	c.adaptiveMu.Lock()
 	c.pathLocked(addr).lastSuccess = time.Now().Add(-time.Second)
+	c.pathLocked(addr).failureSince = time.Now().Add(-time.Second)
 	c.adaptiveMu.Unlock()
 	for range 3 {
 		c.recordStart(addr)

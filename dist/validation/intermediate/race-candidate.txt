@@ -1,0 +1,8 @@
+--- FAIL: TestSharedQueuedIdlePollRestoresCollapsedCapacity (0.00s)
+    starvation_test.go:47: shared backlog was ignored; successful idle reply could not restore capacity
+--- FAIL: TestIndependentResolverFailureRedistributesAndRecovers (0.56s)
+    tuning_test.go:218: one-resolver groups duplicated work after global admission
+FAIL
+FAIL	github.com/Septonious/multidns/core	42.430s
+ok  	github.com/Septonious/multidns/mobile	1.050s
+FAIL

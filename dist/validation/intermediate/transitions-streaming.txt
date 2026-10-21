@@ -1,0 +1,14 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Septonious/multidns/core
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkPoolTransitions/paths-8/group-1-2         	       1	6454285836 ns/op	       697.8 app-max-ms	       118.0 app-p95-ms	        71.00 app-samples	         2.948 download-Mbps	         6.000 health-downs	        41.00 retries	        53.00 timeouts	         2.877 upload-Mbps
+BenchmarkPoolTransitions/paths-8/group-1-2         	       1	5782193999 ns/op	       464.4 app-max-ms	       118.6 app-p95-ms	        60.00 app-samples	         3.584 download-Mbps	         0 health-downs	         2.000 retries	         4.000 timeouts	         2.770 upload-Mbps
+BenchmarkPoolTransitions/paths-8/group-2-2         	       1	5646167245 ns/op	       239.3 app-max-ms	       130.3 app-p95-ms	        62.00 app-samples	         3.492 download-Mbps	         0 health-downs	         0 retries	         1.000 timeouts	         3.080 upload-Mbps
+BenchmarkPoolTransitions/paths-8/group-2-2         	       1	5613395926 ns/op	       318.2 app-max-ms	       118.2 app-p95-ms	        65.00 app-samples	         3.556 download-Mbps	         0 health-downs	         0 retries	         1.000 timeouts	         3.033 upload-Mbps
+BenchmarkPoolTransitions/paths-20/group-1-2        	       1	4025366281 ns/op	       373.1 app-max-ms	       116.7 app-p95-ms	        49.00 app-samples	         7.032 download-Mbps	         0 health-downs	         0 retries	         0 timeouts	         2.814 upload-Mbps
+BenchmarkPoolTransitions/paths-20/group-1-2        	       1	3714343257 ns/op	       208.0 app-max-ms	        93.24 app-p95-ms	        49.00 app-samples	         6.488 download-Mbps	         0 health-downs	         0 retries	         1.000 timeouts	         3.544 upload-Mbps
+BenchmarkPoolTransitions/paths-20/group-2-2        	       1	3743118326 ns/op	       131.2 app-max-ms	       104.0 app-p95-ms	        50.00 app-samples	         6.537 download-Mbps	         0 health-downs	         1.000 retries	         1.000 timeouts	         3.460 upload-Mbps
+BenchmarkPoolTransitions/paths-20/group-2-2        	       1	4130357726 ns/op	       184.4 app-max-ms	        88.32 app-p95-ms	        54.00 app-samples	         6.160 download-Mbps	         0 health-downs	         2.000 retries	         2.000 timeouts	         3.013 upload-Mbps
+PASS
+ok  	github.com/Septonious/multidns/core	48.668s

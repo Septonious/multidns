@@ -138,10 +138,11 @@ public class AppUiTest {
               .put("state", i == 6 ? "yellow" : i == 7 ? "red" : "green")
               .put("status", i == 6 ? "Degraded" : i == 7 ? "Unavailable" : "Active")
               .put("streams", i == 7 ? 0 : 3)
+              .put("transport", i == 0 ? "tcp" : "udp")
               .put("rtt_ms", 43 + i * 4));
     TunnelService.stats =
         new JSONObject()
-            .put("transport_version", "0.3.4")
+            .put("transport_version", "0.3.5")
             .put("uploaded", 2200000)
             .put("downloaded", 6960000)
             .put("streams", 8)
@@ -161,6 +162,10 @@ public class AppUiTest {
     assertEquals(8, rows.size());
     for (Object card : rows.values())
       assertTrue(((TextView) get(card, "detail")).getText().toString().contains("streams"));
+    assertTrue(
+        ((TextView) get(rows.get("192.0.2.1:53"), "detail")).getText().toString().contains("TCP"));
+    assertTrue(
+        ((TextView) get(rows.get("192.0.2.2:53"), "detail")).getText().toString().contains("UDP"));
     assertNull(
         "manual parameter discovery must be absent",
         findText((View) get(activity, "root"), "Find optimal parameters"));

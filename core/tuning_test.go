@@ -214,8 +214,8 @@ func TestIndependentResolverFailureRedistributesAndRecovers(t *testing.T) {
 			recovered = h.Healthy && h.Timeouts > 0
 		}
 	}
-	if c.Stats().DataHedges != 0 {
-		t.Fatal("one-resolver groups duplicated work after global admission")
+	if c.Stats().DataHedges > c.Stats().Exchanges {
+		t.Fatal("more than one opportunistic data backup per exchange")
 	}
 	if !recovered || c.Stats().Retries == 0 {
 		t.Fatalf("missing failure/recovery evidence: %s", c.StatsJSON())

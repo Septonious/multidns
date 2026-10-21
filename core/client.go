@@ -179,7 +179,7 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{SessionSeconds: time.Since(c.started).Seconds(), DataBudget: cap(c.dataSlots), DataInFlight: len(c.dataSlots), ReadInFlight: len(c.readSlots), ActiveUploads: c.activeUploads.Load(), UploadPayloadBytes: c.uploadSize, LoadedRTTLimitMS: c.Profile.LoadedRTTLimitMS, TransportVersion: "0.3.4", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
+	return Stats{SessionSeconds: time.Since(c.started).Seconds(), DataBudget: cap(c.dataSlots), DataInFlight: len(c.dataSlots), ReadInFlight: len(c.readSlots), ActiveUploads: c.activeUploads.Load(), UploadPayloadBytes: c.uploadSize, LoadedRTTLimitMS: c.Profile.LoadedRTTLimitMS, TransportVersion: "0.3.5", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
@@ -220,9 +220,6 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 	groups := c.groupsSnapshot()
 	targets := c.raceTargets(groups[group%len(groups)], f.Bulk)
 	hedgeDelay := time.Duration(0)
-	if c.Profile.Adaptive && (f.Op == opRead || f.Op == opWrite) {
-		targets, hedgeDelay = c.bulkTargets(targets, f.Op, f.Bulk)
-	}
 	if c.Profile.Adaptive && f.Op != opRead && f.Op != opWrite {
 		targets, hedgeDelay = c.controlTargets(targets)
 	}
@@ -233,14 +230,9 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 		if e != nil {
 			return frame{}, e
 		}
-		backups := []string{}
-		for _, addr := range targets {
-			if len(targets) > 1 && addr != primary {
-				backups = append(backups, addr)
-			}
-		}
-		backups = backups[:min(len(backups), max(0, len(targets)-1))]
-		targets = append([]string{primary}, backups...)
+		// A backup comes from the live pool at send time. Group shape must not
+		// decide whether an ordered stream can escape a lost primary packet.
+		targets = []string{primary, ""}
 		hedgeDelay = c.hedgeDelay(primary, f.Op, f.Bulk)
 	}
 	backupNow := make(chan struct{})
@@ -269,7 +261,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			if index == 0 && primaryRelease != nil {
 				release = primaryRelease
 			} else if index > 0 && primaryRelease != nil {
-				release, err = c.tryPath(addr, f.Op, f.Stream)
+				addr, release, err = c.tryAlternative(targets[0], f.Op, f.Stream)
 			} else {
 				release, err = c.acquirePath(raceCtx, addr, f.Op)
 			}
@@ -327,13 +319,12 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				results <- result{e: raceCtx.Err()}
 				return
 			}
-			if f.Op == opWrite && f.Bulk {
-				if err := c.paceUpload(raceCtx, addr); err != nil {
+			if (f.Op == opWrite || f.Op == opRead) && f.Bulk {
+				if err := c.paceData(raceCtx, addr, f.Op); err != nil {
 					results <- result{e: err}
 					return
 				}
 			}
-			started := time.Now()
 			c.recordStart(addr)
 			c.adaptiveMu.Lock()
 			if h := c.health[addr]; h != nil {
@@ -365,20 +356,9 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 					c.controlHedges.Add(1)
 				}
 			}
-			fallback := false
-			r, err, done := c.exchangeDNSTracked(raceCtx, m, addr, "udp", f.Op)
-			wireDone = done
-			if err == nil && r.Truncated {
-				fallback = true
-				c.adaptiveMu.Lock()
-				if h := c.health[addr]; h != nil {
-					h.TCPFallbacks++
-				}
-				c.adaptiveMu.Unlock()
-				tcpCtx, tcpCancel := context.WithTimeout(raceCtx, c.exchangeTimeout(addr, f.Op))
-				r, err, wireDone = c.exchangeDNSTracked(tcpCtx, m, addr, "tcp", f.Op)
-				tcpCancel()
-			}
+			attempt := c.exchangePathDNS(raceCtx, m, addr, f.Op)
+			r, err := attempt.message, attempt.err
+			wireDone = attempt.done
 			var answer frame
 			if err == nil && r.Rcode != dns.RcodeSuccess {
 				err = dnsFailure{r.Rcode}
@@ -393,6 +373,9 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				}
 			}
 			size := 0
+			if err == nil {
+				c.recordTransportSuccess(addr, attempt)
+			}
 			if err == nil && answer.Data[0] == statusOK {
 				if f.Op == opRead {
 					size = len(answer.Data) - 1
@@ -401,13 +384,13 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				}
 			}
 			// A tiny WAIT is not evidence that this path can carry large replies.
-			if fallback && f.Op == opRead && (err != nil || size > 0) {
+			if attempt.fallback && f.Op == opRead && (err != nil || size > 0) {
 				c.recordTCPFallback(addr, err, raceCtx.Err() != nil)
 			}
 			if err != nil && raceCtx.Err() == nil {
 				c.recordFailure(err)
 			}
-			c.recordEnd(addr, time.Since(started), size, f.Op, err, raceCtx.Err() != nil)
+			c.recordEnd(addr, attempt.elapsed, size, f.Op, err, raceCtx.Err() != nil)
 			if err == nil {
 				c.replies.Add(1)
 			}
@@ -452,7 +435,7 @@ func (c *Client) rpcACK(ctx context.Context, f frame, base int, ack func() uint3
 		if f.wake != nil {
 			wake = f.wake()
 		}
-		answer, e := c.race(ctx, f, group%len(c.groupsSnapshot()))
+		answer, e := c.race(ctx, f, group)
 		f.Retry = false
 		if e == nil {
 			switch answer.Data[0] {
@@ -601,6 +584,9 @@ type Conn struct {
 
 func (s *Conn) group(seq uint32, op byte) int {
 	base := s.base
+	if s.client.Profile.Adaptive {
+		return base // shared admission and global backups choose the actual path
+	}
 	if s.client.Profile.Mode != "affinity" {
 		base += int(seq)
 	}
@@ -628,9 +614,11 @@ func (s *Conn) window(operation ...byte) int {
 		desired = min(ceiling, base<<min(5, int(traffic/4096)))
 	}
 	capacity := max(1, s.client.dataCapacity(op))
-	peers := s.client.readerCount()
+	peers := 1
 	if op == opWrite {
 		peers = max(1, int(s.client.activeUploads.Load()))
+	} else {
+		peers = s.client.readerCount()
 	}
 	// Share a pool window across active flows, with two refill positions per
 	// flow. Previously every stream independently offered the entire pool budget.

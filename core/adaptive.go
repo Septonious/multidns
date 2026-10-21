@@ -11,14 +11,22 @@ import (
 )
 
 type ResolverHealth struct {
-	AssignedStreams int     `json:"assigned_streams"`
-	TXQueries       uint64  `json:"tx_queries"`
-	RXQueries       uint64  `json:"rx_queries"`
-	TXTimeouts      uint64  `json:"tx_timeouts"`
-	RXTimeouts      uint64  `json:"rx_timeouts"`
-	HealthDowns     uint64  `json:"health_downs"`
-	SlotWaitMS      float64 `json:"slot_wait_ms"`
-	MaxSlotWaitMS   float64 `json:"max_slot_wait_ms"`
+	Transport           string  `json:"transport"`
+	UDPTimeouts         uint64  `json:"udp_timeouts"`
+	UDPSocketErrors     uint64  `json:"udp_socket_errors"`
+	TransportSwitches   uint64  `json:"transport_switches"`
+	RXCapacity          int     `json:"rx_capacity"`
+	TXCapacity          int     `json:"tx_capacity"`
+	RXCapacityLossCuts  int     `json:"rx_capacity_loss_cuts"`
+	RXCapacityDelayCuts int     `json:"rx_capacity_delay_cuts"`
+	AssignedStreams     int     `json:"assigned_streams"`
+	TXQueries           uint64  `json:"tx_queries"`
+	RXQueries           uint64  `json:"rx_queries"`
+	TXTimeouts          uint64  `json:"tx_timeouts"`
+	RXTimeouts          uint64  `json:"rx_timeouts"`
+	HealthDowns         uint64  `json:"health_downs"`
+	SlotWaitMS          float64 `json:"slot_wait_ms"`
+	MaxSlotWaitMS       float64 `json:"max_slot_wait_ms"`
 
 	PacingWaitMS        float64 `json:"pacing_wait_ms"`
 	PacedQueries        uint64  `json:"paced_queries"`
@@ -117,6 +125,20 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 		copy.TXWorkers = settings.TXWorkers
 		copy.RXWorkers = settings.RXWorkers
 		if p := c.paths[h.Endpoint]; p != nil {
+			copy.Transport = "udp"
+			if p.preferTCP {
+				copy.Transport = "tcp"
+			}
+			copy.RXCapacity = c.readLimitLocked(p)
+			copy.TXCapacity = p.limit
+			if p.preferTCP {
+				copy.TXCapacity = min(copy.TXCapacity, 4)
+			}
+			if settings.TXWorkers > 0 {
+				copy.TXCapacity = min(copy.TXCapacity, settings.TXWorkers)
+			}
+			copy.RXCapacityLossCuts = p.rx.lossCuts
+			copy.RXCapacityDelayCuts = p.rx.delayCuts
 			copy.AssignedStreams = len(p.streams)
 			copy.CapacityBudgetCuts = p.budgetCuts
 			if p.outcomeCount > 0 {
@@ -220,11 +242,16 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		// their ARQ retries are already free to use every other live path.
 		path := c.pathLocked(addr)
 		path.lastIssue = time.Now()
+		if path.failureSince.IsZero() {
+			path.failureSince = time.Now()
+		}
 		// Briefly route new work elsewhere without displaying a disconnect.
 		// This also stops an overloaded recursor accumulating a fresh burst.
-		path.retryAt = time.Now().Add(time.Duration(min(100, max(25, h.RTTMS/2)) * float64(time.Millisecond)))
+		if op != opRead {
+			path.retryAt = time.Now().Add(time.Duration(min(100, max(25, h.RTTMS/2)) * float64(time.Millisecond)))
+		}
 		quiet := max(150*time.Millisecond, time.Duration(3*h.RTTMS*float64(time.Millisecond)))
-		if h.Failures >= 3 && time.Since(path.lastSuccess) >= quiet {
+		if h.Failures >= 3 && time.Since(path.lastSuccess) >= quiet && time.Since(path.failureSince) >= min(quiet, 150*time.Millisecond) {
 			if h.Healthy {
 				h.HealthDowns++
 			}
@@ -239,6 +266,8 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 	}
 	h.Healthy = true
 	c.pathLocked(addr).lastSuccess = time.Now()
+	c.pathLocked(addr).failureSince = time.Time{}
+	c.pathLocked(addr).probeFailures = 0
 	h.Replies++
 	if op == opWrite {
 		h.Uploaded += uint64(size)
@@ -370,21 +399,28 @@ func (c *Client) measure(ctx context.Context, addr string) ResolverHealth {
 			h.Failures = 3
 			return h
 		}
-		probeCtx, cancel := context.WithTimeout(ctx, time.Duration(min(c.Profile.TimeoutMS, 700))*time.Millisecond)
-		start := time.Now()
+		probeCtx, cancel := context.WithTimeout(ctx, time.Duration(2*min(c.Profile.TimeoutMS, 700))*time.Millisecond)
 		// Reuse the protected resolver socket. The tracked transport interrupts
 		// a canceled probe immediately, unlike a fresh DNS Client read deadline.
-		reply, e, _ := c.exchangeDNSTracked(probeCtx, m, addr, "udp", opProbe)
+		attempt := c.exchangePathDNS(probeCtx, m, addr, opProbe)
+		reply, e := attempt.message, attempt.err
 		cancel()
 		if e == nil {
 			r, err := parseResponse(reply, c.Profile.Key)
-			if err != nil || r.Nonce != f.Nonce || r.Session != f.Session || len(r.Data) != len(data)+1 || r.Data[0] != statusOK || string(r.Data[1:]) != string(data) {
+			if err != nil || reply.Rcode != 0 || r.Op != f.Op || r.Stream != f.Stream || r.Seq != f.Seq || r.Nonce != f.Nonce || r.Session != f.Session || len(r.Data) != len(data)+1 || r.Data[0] != statusOK || string(r.Data[1:]) != string(data) {
 				e = fmt.Errorf("invalid tunnel probe")
 			}
 		}
 		if e == nil {
-			total += time.Since(start)
+			c.recordTransportSuccess(addr, attempt)
+			total += attempt.elapsed
 			success++
+		}
+		// A failed UDP+TCP pair already checked both transports. Repeating it
+		// would let a large dead pool consume the entire startup/recovery sweep
+		// before later healthy candidates get a turn.
+		if e != nil && attempt.udpUnavailable {
+			break
 		}
 		if ctx.Err() != nil {
 			break
@@ -413,9 +449,27 @@ func (c *Client) testLatency(ctx context.Context, emit func(ResolverHealth), ski
 			defer wg.Done()
 			for addr := range jobs {
 				h := c.measure(ctx, addr)
+				if ctx.Err() != nil {
+					continue
+				}
 				c.adaptiveMu.Lock()
+				if h.Healthy {
+					path := c.pathLocked(addr)
+					path.lastSuccess, path.failureSince = time.Now(), time.Time{}
+					path.probeFailures = 0
+				}
 				old := c.health[addr]
 				if old != nil {
+					path := c.pathLocked(addr)
+					if skipActive && !h.Healthy {
+						path.probeFailures++
+						// One post-load pair of lost canaries is not an outage.
+						if path.probeFailures < 2 {
+							h.Healthy = old.Healthy
+						}
+					} else if h.Healthy {
+						path.probeFailures = 0
+					}
 					// A tiny health probe must not erase accumulated loss diagnostics
 					// or replace the loaded-path RTT estimator.
 					if !old.Healthy && h.Healthy {
@@ -455,7 +509,7 @@ loop:
 		if skipActive {
 			c.adaptiveMu.Lock()
 			h, p := c.health[addr], c.paths[addr]
-			recent := h != nil && h.Healthy && p != nil && time.Since(p.lastSuccess) < 3*time.Second
+			recent := h != nil && h.Healthy && p != nil && time.Since(p.lastSuccess) < 3*time.Second && !(p.preferTCP && !time.Now().Before(p.udpProbeAt))
 			c.adaptiveMu.Unlock()
 			if recent {
 				continue

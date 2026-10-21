@@ -1191,7 +1191,10 @@ public final class MainActivity extends Activity {
             row.optString("state", "yellow"),
             row.optString("status", "Checking"),
             rtt > 0 ? String.format(Locale.ROOT, "%.0f ms", rtt) : "—",
-            row.optInt("streams") + " streams");
+            row.optInt("streams")
+                + (row.optInt("streams") == 1 ? " stream" : " streams")
+                + "  ·  "
+                + row.optString("transport", "udp").toUpperCase(Locale.ROOT));
       }
     } catch (JSONException ignored) {
     }

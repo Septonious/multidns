@@ -69,6 +69,7 @@ func TestQuietFailedPathIsRemovedAndAuthenticatedRecoveryRestoresIt(t *testing.T
 	c.recordEnd(addr, 40*time.Millisecond, 110, opWrite, nil, false)
 	c.adaptiveMu.Lock()
 	c.pathLocked(addr).lastSuccess = time.Now().Add(-time.Second)
+	c.pathLocked(addr).failureSince = time.Now().Add(-time.Second)
 	c.adaptiveMu.Unlock()
 	for range 3 {
 		c.recordStart(addr)

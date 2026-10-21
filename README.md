@@ -24,8 +24,8 @@ multidns-client -profile profile.json -listen 127.0.0.1:1080
 
 The server and profile must use the same key. No key is shipped in the APK.
 The CLI provides a SOCKS5 endpoint; Android wraps it in a VpnService.
-In adaptive mode healthy fast paths carry controls with a delayed backup; groups
-define data backups, and primary data work shares the whole resolver pool. Fixed scheduling retains group duplication.
+In adaptive mode healthy fast paths carry controls with a delayed backup; unique data work and one opportunistic delayed backup share the whole live pool,
+regardless of group shape. Fixed scheduling retains group duplication.
 Each stream uses independent sequence numbers and a bounded retransmission window.
 Resolver failover preserves destination connections while server stream state lives.
 Switching independent servers creates a new session.
@@ -43,22 +43,27 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.3.4 adds a compact
-server picker with overflow actions, consistent dark colors and vector icons,
-and a **Resolvers** tab. While disconnected it offers ICMP + authenticated E2E
-DNS tests; while connected it displays colored resolver cards with latency,
-current stream assignments and status. Android transport settings adapt
-automatically; old manual resolver overrides and the discovery menu are removed.
+amd64/arm64 server, client, and scanner binaries. Version 0.3.5 keeps the compact
+dark interface and automatic resolver control. The **Resolvers** tab offers
+ICMP + authenticated E2E tests while disconnected, then slim live cards with
+latency, stream assignments, UDP/TCP transport and status. Detailed debug
+capture remains off by default; normal snapshots stay small.
 
-Detailed debug capture is off by default and can be enabled for copying a report.
-Regular UI snapshots are small, expensive timing is optional, and active payload
-traffic replaces redundant health probes. Resolver loss no longer causes a false
-offline/recovered transition on every isolated timeout. The fair scheduler wakes
-one selected request per credit and bounds global data credits at 512, with the
-existing pacing and 500 ms loaded-RTT feedback target. Internet/recovery outliers
-can exceed that target. The 0.3.0–0.3.3 server remains compatible; update the APK
-for the new UI and client behavior. Saved profiles/keys and wire format remain
-compatible. See [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) for exact semantics.
+The SOCKS upload pipeline now spans local TCP read boundaries, without a flush
+round trip after every buffer. Separate TX/RX feedback prevents lost downloads
+from shrinking reliable upload capacity. Download pacing and delay feedback,
+bounded shared credits, fair scheduling and opportunistic global backups keep
+both group layouts under the same control. Health confirmation tolerates a
+single batch of simultaneous expirations and one failed post-load probe cycle.
+
+UDP/53 is preferred. Authenticated TCP/53 fallback covers unavailable UDP as well
+as truncated responses, reuses bounded protected connections, and periodically
+checks whether UDP has recovered. Uploads, reads and controls have separate TCP
+connections so an idle long-poll cannot block an upload ACK. Existing 0.3.0–0.3.4
+servers already listen on both transports and remain compatible. Saved profiles,
+keys, wire format, authentication and optional XOR are unchanged. The 500 ms RTT
+setting is a feedback target, not a worst-case Internet/recovery guarantee.
+See [`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md) for exact semantics.
 Verify downloads with `sha256sum -c SHA256SUMS` from that directory. Build and
 signature evidence is in `dist/validation/`.
 

@@ -19,6 +19,7 @@ type pendingDNS struct {
 	err      error
 }
 type resolverSocket struct {
+	serial  chan struct{}
 	conn    net.Conn
 	mu      sync.Mutex
 	next    uint16
@@ -43,6 +44,9 @@ func (c *Client) ResetSockets() {
 
 func (c *Client) socket(ctx context.Context, addr, network string) (*resolverSocket, error) {
 	key := network + "|" + addr
+	if strings.HasPrefix(network, "tcp-") {
+		network = "tcp"
+	}
 	c.socketsMu.Lock()
 	if s := c.sockets[key]; s != nil {
 		select {
@@ -66,6 +70,9 @@ func (c *Client) socket(ctx context.Context, addr, network string) (*resolverSoc
 		_ = udp.SetWriteBuffer(1 << 20)
 	}
 	s := &resolverSocket{conn: conn, network: network, pending: map[uint16]*pendingDNS{}, done: make(chan struct{}), write: make(chan struct{}, 1)}
+	if network == "tcp" {
+		s.serial = make(chan struct{}, 1)
+	}
 	c.socketsMu.Lock()
 	defer c.socketsMu.Unlock()
 	if c.ctx.Err() != nil || epoch != c.socketsEpoch {
@@ -178,7 +185,37 @@ func (c *Client) exchangeDNSTracked(ctx context.Context, m *dns.Msg, addr, netwo
 	if e != nil {
 		return nil, e, finishedDNS
 	}
+	if s.serial != nil {
+		select {
+		case s.serial <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err(), finishedDNS
+		case <-c.ctx.Done():
+			return nil, net.ErrClosed, finishedDNS
+		}
+	}
 	p := &pendingDNS{question: m.Question[0].Name, reply: make(chan *dns.Msg, 1), done: make(chan struct{})}
+	registered := false
+	if s.serial != nil {
+		defer func() {
+			if !registered {
+				<-s.serial
+				return
+			}
+			select {
+			case <-p.done:
+				<-s.serial
+			default:
+				go func() {
+					select {
+					case <-p.done:
+					case <-c.ctx.Done():
+					}
+					<-s.serial
+				}()
+			}
+		}()
+	}
 	var id uint16
 	found := false
 	s.mu.Lock()
@@ -201,6 +238,7 @@ func (c *Client) exchangeDNSTracked(ctx context.Context, m *dns.Msg, addr, netwo
 	default:
 	}
 	s.pending[id] = p
+	registered = true
 	s.mu.Unlock()
 	sent := false
 	defer func() {

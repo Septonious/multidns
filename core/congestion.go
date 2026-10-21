@@ -11,9 +11,15 @@ import (
 // prevent ten busy streams from flooding the same recursive resolver.
 // Admission happens before global slots and before starting an exchange timer.
 type pathState struct {
+	rx                                      readControl
+	preferTCP                               bool
+	tcpCursor                               uint32
+	udpSuccess, udpProbeAt                  time.Time
+	udpFailures, probeFailures              int
 	streams                                 map[uint32]int
 	lastIssue                               time.Time
 	lastSuccess                             time.Time
+	failureSince                            time.Time
 	lastLoss                                time.Time
 	lossBurst                               int
 	lastCutMild                             bool
@@ -45,6 +51,7 @@ func (c *Client) pathLocked(addr string) *pathState {
 	if p == nil {
 		p = &pathState{limit: min(8, c.Profile.Window), wake: make(chan struct{})}
 		p.limit = min(c.pathCeiling(addr), max(2, p.limit))
+		p.rx.limit = min(8, max(2, c.Profile.Window))
 		c.paths[addr] = p
 	}
 	return p
@@ -101,6 +108,23 @@ func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error,
 	}
 	p := c.pathLocked(addr)
 	now := time.Now()
+	if size <= 0 && err == nil {
+		// WAIT is not a congestion sample, but it can cautiously restore the
+		// startup floor when real queued work is starved after an old loss cut.
+		startup := min(c.pathCeiling(addr), max(2, min(8, c.Profile.Window)))
+		if (p.waiting > 0 || len(c.admissions) > 0) && p.limit < startup && now.Sub(p.lastCut) > time.Second && now.Sub(p.lastIdleGrowth) > 500*time.Millisecond {
+			p.limit++
+			p.recoveries++
+			p.lastIdleGrowth = now
+			p.signal()
+			c.wakeAdmissionsLocked()
+		}
+		return
+	}
+	if op == opRead {
+		c.updateReadCapacityLocked(addr, p, size, err, elapsed, now)
+		return
+	}
 	p.observeOutcome(err != nil)
 	if err != nil {
 		// A lost read or one lost write cannot invalidate contemporaneous
@@ -150,19 +174,6 @@ func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error,
 		p.successes = 0
 		p.lastCut = now
 		p.signal()
-		return
-	}
-	if size <= 0 {
-		// Adaptive primaries wait in the shared queue, not p.waiting. Successful
-		// idle polls must be able to restore startup capacity after a loss episode.
-		startup := min(c.pathCeiling(addr), max(2, min(8, c.Profile.Window)))
-		if (p.waiting > 0 || len(c.admissions) > 0) && p.limit < startup && now.Sub(p.lastCut) > time.Second && now.Sub(p.lastIdleGrowth) > 500*time.Millisecond {
-			p.limit++
-			p.recoveries++
-			p.lastIdleGrowth = now
-			p.signal()
-			c.wakeAdmissionsLocked()
-		}
 		return
 	}
 	// Read replies, including nonempty ones, can include the server's deliberate

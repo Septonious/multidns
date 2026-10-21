@@ -11,11 +11,12 @@ func (c *Client) SetDiagnostics(enabled bool) { c.diagnostics.Store(enabled) }
 func (c *Client) DiagnosticsEnabled() bool    { return c.diagnostics.Load() }
 
 type resolverSummary struct {
-	Endpoint string  `json:"endpoint"`
-	RTT      float64 `json:"rtt_ms"`
-	Streams  int     `json:"streams"`
-	Status   string  `json:"status"`
-	State    string  `json:"state"`
+	Transport string  `json:"transport"`
+	Endpoint  string  `json:"endpoint"`
+	RTT       float64 `json:"rtt_ms"`
+	Streams   int     `json:"streams"`
+	Status    string  `json:"status"`
+	State     string  `json:"state"`
 }
 
 func (c *Client) SummaryJSON() string {
@@ -28,7 +29,7 @@ func (c *Client) SummaryJSON() string {
 		}
 	}
 	for _, addr := range c.Profile.ResolverPool() {
-		row := resolverSummary{Endpoint: addr, State: "yellow", Status: "Checking"}
+		row := resolverSummary{Endpoint: addr, Transport: "udp", State: "yellow", Status: "Checking"}
 		h := c.health[addr]
 		p := c.paths[addr]
 		if h != nil {
@@ -50,6 +51,9 @@ func (c *Client) SummaryJSON() string {
 			}
 		}
 		if p != nil {
+			if p.preferTCP {
+				row.Transport = "tcp"
+			}
 			row.Streams = len(p.streams)
 			if p.txRTT > 0 && time.Since(p.txChecked) < 10*time.Second {
 				row.RTT = p.txRTT
@@ -74,6 +78,6 @@ func (c *Client) SummaryJSON() string {
 		GroupCount int               `json:"group_count"`
 		Resolvers  []resolverSummary `json:"resolvers"`
 		Debug      bool              `json:"debug_enabled"`
-	}{"0.3.4", c.uploaded.Load(), c.downloaded.Load(), c.streams.Load(), groups, rows, c.DiagnosticsEnabled()})
+	}{"0.3.5", c.uploaded.Load(), c.downloaded.Load(), c.streams.Load(), groups, rows, c.DiagnosticsEnabled()})
 	return string(b)
 }

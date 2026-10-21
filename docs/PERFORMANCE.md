@@ -1,5 +1,70 @@
 # Performance and tuning
 
+## Version 0.3.5: continuous SOCKS uploads and directional control
+
+The user's 0.3.4 phone tests measured 14.8/3.12 and 16.0/3.66 Mbps down/up,
+with download-loaded RTT 636/210 ms. These are user measurements, not results
+for 0.3.5. Their report has 886 timeouts in 247331 exchanges; most fast
+31.131.* losses are reads, yet the old shared controller cuts upload capacity.
+Their JSON is truncated. More resolver IPs can share upstream capacity; the
+number of addresses alone does not establish independent bandwidth.
+
+0.3.5 separates RX loss/delay control from upload ACK feedback, paces bulk reads,
+and keeps SOCKS selective ACKs moving across local TCP read boundaries. Its
+bounded source buffer replaces per-buffer flush/drain barriers. One opportunistic
+global backup is available for singles and pairs. Small interactive reservations,
+no-progress health dwell and two-cycle idle canaries address load transitions.
+The 512 global / 160 read ceilings, HMAC, XOR and wire bytes are unchanged.
+TCP/53 fallback additionally supports blocked UDP, bounded connection reuse,
+separate long-polls and upload ACKs, and authenticated return to UDP.
+
+The existing QNAME limit still leaves 110 upstream payload bytes for t.atmosl.ink,
+versus up to 768 bytes per downstream reply. Equal packet rates therefore do not
+produce equal upload/download Mbps; no application TLS layer is added here.
+
+### Controlled SOCKS transition comparison
+
+Identical fixture source runs sequentially on the local two-CPU host against
+b93d06c / 0.3.4 and the current source. Each case downloads 3 x 512 KiB, then
+uploads 3 x 256 KiB with SHA-256 verification and waits 600 ms, while an
+application echo and eight idle SOCKS connections share the pool. Paths have
+35..95 ms base delay, shared service queueing above 40 requests, extra download
+queueing above eight reads, and every 67th read request is lost. The new version
+runs twice per layout; the baseline runs once. These are short, noisy fixtures,
+not a production resolver bandwidth prediction.
+
+| Paths | Group size | 0.3.4 upload Mbps | 0.3.5 upload Mbps (range) | 0.3.5 download Mbps (range) | Slowest final echo ms |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 1 | 1.87 | 2.75–2.94 | 3.05–3.62 | 280.0 |
+| 8 | 2 | 1.85 | 2.07–2.95 | 3.17–3.40 | 414.2 |
+| 20 | 1 | 2.31 | 2.58–3.22 | 6.64–6.89 | 198.9 |
+| 20 | 2 | 2.20 | 2.35–2.73 | 6.80–6.93 | 234.3 |
+
+All eight final cases retain zero health-down transitions, and their slowest
+application echo is below 500 ms. One final eight-path pair case still records
+83 timeouts / 61 retries and lower upload throughput, so loss is not eliminated.
+Earlier streaming candidates had a 697.8 ms echo and 6–8 health-down transitions;
+those logs remain in intermediate evidence. Do not erase the outlier or infer a
+strict 500 ms guarantee from the final samples. Final timings precede only a
+small probe-success bookkeeping/diagnostic-field change and an early stop
+after a failed UDP+TCP probe pair, covered by the final source tests. The physical Oppo and production pool require remeasurement.
+
+Validation also retained intermittent failures: one full run timed out in the
+collapsed-capacity HTTPS case; one of six isolated repeats failed, then three
+more isolated repeats passed. A subsequent full run passed that case but failed
+its loaded-control RTT and dormant tuner timing checks. A serialized complete
+race suite then passed (45.879 s core), followed by two passes of targeted final
+fallback/streaming/cancellation tests. The exact release source then passed
+another full serialized race suite (49.194 s core) and vet. No common cause was established;
+do not claim the health dwell change proves those timing failures are solved.
+
+TCP tests cover a UDP blackhole, sequential TCP service delay, upload/download
+integrity, connection reuse, invalid authentication, UDP recovery, stale reply
+ordering and TCP-only scanner discovery. Streaming tests verify a fragmented
+160 KiB upload through SOCKS with deliberate loss, destination EOF/half-close
+commit and cancellation of an idle source reader. The actual native VPN and
+mobile radio are not executed on this host.
+
 ## Version 0.3.4: stable health, bounded larger pools and lightweight UI
 
 The user's changed 20/21-candidate pool measured 10.2 Mbps down / 1.53 Mbps up,

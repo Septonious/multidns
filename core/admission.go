@@ -34,6 +34,11 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 	if cap(c.dataSlots) > 0 && c.leasedData >= cap(c.dataSlots) {
 		return false
 	}
+	// Leave a small amount of real wire room for interactive traffic rather
+	// than placing its next packet behind a complete bulk window.
+	if bulk && cap(c.dataSlots) > 32 && c.leasedData >= cap(c.dataSlots)-8 {
+		return false
+	}
 	if op == opRead && cap(c.readSlots) > 0 && c.leasedReads >= cap(c.readSlots) {
 		return false
 	}
@@ -47,16 +52,23 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 		}
 	}
 	settings := c.Profile.ResolverSettings[addr]
-	// Priority is bounded in the shared queue, not enforced by a hard bulk
-	// reservation that can strand the only remaining direction credit.
-	if p.flight >= p.limit {
+	// Small windows retain all their credits; larger windows keep one position
+	// available for a short foreground request.
+	limit := p.limit
+	if p.preferTCP {
+		limit = min(limit, 5)
+	}
+	if bulk && limit > 8 {
+		limit--
+	}
+	if p.flight >= limit {
 		return false
 	}
 	if op == opRead {
-		if time.Now().Before(p.readRetryAt) {
+		if time.Now().Before(p.readRetryAt) || time.Now().Before(p.rx.retryAt) {
 			return false
 		}
-		rx := min(32, max(1, p.limit-2))
+		rx := c.readLimitLocked(p)
 		if settings.RXWorkers > 0 {
 			rx = min(rx, settings.RXWorkers)
 		}
@@ -66,6 +78,9 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 			rx = min(rx, max(1, p.limit/2))
 		}
 		return p.reads < rx
+	}
+	if p.preferTCP && p.flight-p.reads >= 4 {
+		return false
 	}
 	return settings.TXWorkers == 0 || p.flight-p.reads < settings.TXWorkers
 }
@@ -107,6 +122,42 @@ func (c *Client) tryPath(addr string, op byte, streams ...uint32) (func(), error
 		stream = streams[0]
 	}
 	return c.leaseFlowLocked(addr, op, true, stream), nil
+}
+
+// Opportunistic redundancy never jumps ahead of queued unique work, and its
+// physical lease is held until the original DNS exchange has actually ended.
+func (c *Client) tryAlternative(primary string, op byte, stream uint32) (string, func(), error) {
+	c.adaptiveMu.Lock()
+	defer c.adaptiveMu.Unlock()
+	if len(c.admissions) > 0 {
+		return "", nil, errPathBusy
+	}
+	best, cost := "", math.MaxFloat64
+	for _, g := range c.groups {
+		for _, addr := range g.Resolvers {
+			if addr == primary || !c.pathAvailableLocked(addr, op, true) {
+				continue
+			}
+			p := c.pathLocked(addr)
+			rtt := 100.0
+			if h := c.health[addr]; h != nil {
+				if !h.Healthy {
+					continue
+				}
+				if h.RTTMS > 0 {
+					rtt = h.RTTMS
+				}
+			}
+			v := rtt * (1 + float64(p.flight)/float64(max(1, p.limit)))
+			if v < cost {
+				best, cost = addr, v
+			}
+		}
+	}
+	if best == "" {
+		return "", nil, errPathBusy
+	}
+	return best, c.leaseFlowLocked(best, op, true, stream), nil
 }
 
 // One shared admission queue with per-flow fairness replaces hundreds of requests

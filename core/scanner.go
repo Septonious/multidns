@@ -23,6 +23,7 @@ type ScanOptions struct {
 	NSZone    string  `json:"ns_zone"`
 }
 type ScanResult struct {
+	Transport  string `json:"transport,omitempty"`
 	Index      uint64 `json:"index"`
 	Endpoint   string `json:"endpoint"`
 	Responding bool   `json:"responding"`
@@ -188,13 +189,25 @@ func scanOne(ctx context.Context, o ScanOptions, endpoint string, protector Prot
 	}
 	defer c.Close()
 	start := time.Now()
-	probeCtx, cancel := context.WithTimeout(ctx, time.Duration(o.TimeoutMS)*time.Millisecond)
+	probeCtx, cancel := context.WithTimeout(ctx, time.Duration(2*o.TimeoutMS)*time.Millisecond)
 	defer cancel()
 	e = c.Probe(probeCtx)
 	result.RTTMS = time.Since(start).Milliseconds()
 	result.Tunnel = e == nil
 	result.TXT = e == nil
-	dc := &dns.Client{Net: "udp", Timeout: time.Duration(o.TimeoutMS) * time.Millisecond, Dialer: c.dialer}
+	network := "udp"
+	if e == nil {
+		for _, h := range c.healthSnapshot() {
+			if h.Endpoint == endpoint {
+				network = h.Transport
+				result.Transport = network
+				if h.RTTMS > 0 {
+					result.RTTMS = max(1, int64(h.RTTMS))
+				}
+			}
+		}
+	}
+	dc := &dns.Client{Net: network, Timeout: time.Duration(o.TimeoutMS) * time.Millisecond, Dialer: c.dialer}
 	zone := strings.TrimSuffix(o.NSZone, ".")
 	if zone == "" {
 		parts := strings.Split(p.Domain, ".")

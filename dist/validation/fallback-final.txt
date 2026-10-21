@@ -1,0 +1,2 @@
+ok  	github.com/Septonious/multidns/core	11.705s
+ok  	github.com/Septonious/multidns/mobile	1.031s
