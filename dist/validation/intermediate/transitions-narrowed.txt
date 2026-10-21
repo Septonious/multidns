@@ -1,0 +1,10 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Septonious/multidns/core
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkPoolTransitions/paths-20/group-1-2         	       1	4985312362 ns/op	       842.3 app-max-ms	       105.7 app-p95-ms	        49.00 app-samples	         6.670 download-Mbps	         1.000 health-downs	        22.00 retries	       115.0 timeouts	         2.030 upload-Mbps
+BenchmarkPoolTransitions/paths-20/group-1-2         	       1	4725208253 ns/op	       482.7 app-max-ms	       119.9 app-p95-ms	        50.00 app-samples	         6.838 download-Mbps	         0 health-downs	         4.000 retries	         4.000 timeouts	         2.181 upload-Mbps
+BenchmarkPoolTransitions/paths-20/group-2-2         	       1	7543435522 ns/op	       885.0 app-max-ms	       208.9 app-p95-ms	        64.00 app-samples	         3.256 download-Mbps	         0 health-downs	         5.000 retries	        22.00 timeouts	         1.710 upload-Mbps
+BenchmarkPoolTransitions/paths-20/group-2-2         	       1	15143572326 ns/op	      1031 app-max-ms	       704.9 app-p95-ms	        75.00 app-samples	         2.138 download-Mbps	        20.00 health-downs	       552.0 retries	       643.0 timeouts	         0.6795 upload-Mbps
+PASS
+ok  	github.com/Septonious/multidns/core	39.026s

@@ -66,8 +66,8 @@ Warning: SDK processing. This version only understands SDK XML versions up to 3 
 > Task :app:packageDebugUnitTestForUnitTest
 > Task :app:processDebugUnitTestJavaRes NO-SOURCE
 > Task :app:generateDebugUnitTestConfig
-> Task :app:processDebugAndroidTestManifest UP-TO-DATE
 > Task :app:testDebugUnitTest
+> Task :app:processDebugAndroidTestManifest UP-TO-DATE
 > Task :app:generateDebugAndroidTestBuildConfig UP-TO-DATE
 > Task :app:javaPreCompileDebugAndroidTest UP-TO-DATE
 > Task :app:checkDebugAndroidTestAarMetadata UP-TO-DATE
@@ -104,5 +104,5 @@ Note: Recompile with -Xlint:deprecation for details.
 > Task :app:assembleDebugAndroidTest UP-TO-DATE
 [Incubating] Problems report is available at: file:///workspace/multidns/android/build/reports/problems/problems-report.html
 
-BUILD SUCCESSFUL in 1m 49s
+BUILD SUCCESSFUL in 1m 33s
 81 actionable tasks: 11 executed, 70 up-to-date

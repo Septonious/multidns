@@ -28,6 +28,7 @@ func (c *Client) SummaryJSON() string {
 			active[addr] = true
 		}
 	}
+	now := time.Now()
 	for _, addr := range c.Profile.ResolverPool() {
 		row := resolverSummary{Endpoint: addr, Transport: "udp", State: "yellow", Status: "Checking"}
 		h := c.health[addr]
@@ -44,9 +45,12 @@ func (c *Client) SummaryJSON() string {
 			} else {
 				row.State = "green"
 				row.Status = "Ready"
-				if p != nil && (time.Since(p.lastIssue) < 2*time.Second || time.Now().Before(p.readRetryAt)) {
+				if p != nil && (now.Sub(p.lastIssue) < 2*time.Second || now.Before(p.readRetryAt)) {
 					row.State = "yellow"
-					row.Status = "Degraded"
+					row.Status = "Recent loss"
+					if now.Before(p.readRetryAt) || now.Before(p.rx.retryAt) {
+						row.Status = "Download limited"
+					}
 				}
 			}
 		}
@@ -55,16 +59,16 @@ func (c *Client) SummaryJSON() string {
 				row.Transport = "tcp"
 			}
 			row.Streams = len(p.streams)
-			if p.txRTT > 0 && time.Since(p.txChecked) < 10*time.Second {
+			if p.txRTT > 0 && now.Sub(p.txChecked) < 10*time.Second {
 				row.RTT = p.txRTT
 			}
 			if row.State == "green" && row.Streams > 0 {
 				row.Status = "Active"
 			}
 		}
-		if row.State == "green" && row.RTT > c.writeRTTLimit() {
+		if h != nil && h.Healthy && active[addr] && row.RTT > c.writeRTTLimit() {
 			row.State = "yellow"
-			row.Status = "Degraded"
+			row.Status = "High latency"
 		}
 		rows = append(rows, row)
 	}
@@ -78,6 +82,6 @@ func (c *Client) SummaryJSON() string {
 		GroupCount int               `json:"group_count"`
 		Resolvers  []resolverSummary `json:"resolvers"`
 		Debug      bool              `json:"debug_enabled"`
-	}{"0.3.5", c.uploaded.Load(), c.downloaded.Load(), c.streams.Load(), groups, rows, c.DiagnosticsEnabled()})
+	}{"0.3.6", c.uploaded.Load(), c.downloaded.Load(), c.streams.Load(), groups, rows, c.DiagnosticsEnabled()})
 	return string(b)
 }

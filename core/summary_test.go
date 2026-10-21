@@ -115,3 +115,57 @@ func TestResolverCardStateDistinguishesUnknownLossAndConfirmedOutage(t *testing.
 		t.Fatal("confirmed outage is not red")
 	}
 }
+
+func TestYellowCardExplainsDirectionalIssueWithoutImposingStreamCap(t *testing.T) {
+	p, _ := testProfile(t)
+	p.Adaptive = true
+	c, err := NewClient(p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	addr := p.Groups[0].Resolvers[0]
+	c.adaptiveMu.Lock()
+	c.health[addr] = &ResolverHealth{Endpoint: addr, Healthy: true, RTTMS: 44}
+	path := c.pathLocked(addr)
+	path.limit, path.lastIssue = 64, time.Now()
+	leases := []func(){}
+	for i := range 12 {
+		leases = append(leases, c.leaseFlowLocked(addr, opWrite, true, uint32(i+1)))
+	}
+	if !c.pathAvailableLocked(addr, opWrite, true) {
+		t.Error("healthy low-latency path arbitrarily capped at 12 streams")
+	}
+	c.adaptiveMu.Unlock()
+	defer func() {
+		for _, release := range leases {
+			release()
+		}
+	}()
+	check := func(want string) {
+		t.Helper()
+		var data struct {
+			Resolvers []resolverSummary `json:"resolvers"`
+		}
+		if err := json.Unmarshal([]byte(c.SummaryJSON()), &data); err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range data.Resolvers {
+			if row.Endpoint == addr {
+				if row.Status != want || row.State != "yellow" || row.Streams != 12 {
+					t.Fatalf("unexpected resolver card: %+v, want %s", row, want)
+				}
+				return
+			}
+		}
+		t.Fatal("resolver card missing")
+	}
+	check("Recent loss")
+	c.recordTCPFallback(addr, context.DeadlineExceeded, false)
+	check("Download limited")
+	c.adaptiveMu.Lock()
+	path.lastIssue, path.readRetryAt = time.Time{}, time.Time{}
+	c.health[addr].RTTMS = c.writeRTTLimit() + 10
+	c.adaptiveMu.Unlock()
+	check("High latency")
+}

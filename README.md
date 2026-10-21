@@ -43,17 +43,21 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.3.5 keeps the compact
-dark interface and automatic resolver control. The **Resolvers** tab offers
+amd64/arm64 server, client, and scanner binaries. Version 0.3.6 keeps the compact
+dark green interface and automatic resolver control. The **Resolvers** tab offers
 ICMP + authenticated E2E tests while disconnected, then slim live cards with
 latency, stream assignments, UDP/TCP transport and status. Detailed debug
-capture remains off by default; normal snapshots stay small.
+capture remains off by default; normal snapshots stay small. Yellow cards now
+name recent loss, a download cooldown or high latency. Stream counts describe
+outstanding work and do not imply a fixed ten-stream limit.
 
 The SOCKS upload pipeline now spans local TCP read boundaries, without a flush
 round trip after every buffer. Separate TX/RX feedback prevents lost downloads
 from shrinking reliable upload capacity. Download pacing and delay feedback,
 bounded shared credits, fair scheduling and opportunistic global backups keep
-both group layouts under the same control. Health confirmation tolerates a
+both group layouts under the same control. Flow and physical lease release now
+wake the admission queue once, with a small fixed readiness cache for TX/RX
+traffic classes. Health confirmation tolerates a
 single batch of simultaneous expirations and one failed post-load probe cycle.
 
 UDP/53 is preferred. Authenticated TCP/53 fallback covers unavailable UDP as well

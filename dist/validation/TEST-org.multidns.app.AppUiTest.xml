@@ -1,12 +1,11 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="org.multidns.app.AppUiTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-10-21T00:33:29" hostname="e031e7fac3da" time="23.654">
-  <properties/>
-  <testcase name="screensAt360dp" classname="org.multidns.app.AppUiTest" time="22.773"/>
-  <testcase name="narrowScreenLargeFont" classname="org.multidns.app.AppUiTest" time="0.873"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[Invalid ID 0x00000000.
+<?xml version='1.0' encoding='utf-8'?>
+<testsuite name="org.multidns.app.AppUiTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-10-21T09:31:59" hostname="654b056541d8" time="29.369">
+  <testcase name="screensAt360dp" classname="org.multidns.app.AppUiTest" time="27.735" />
+  <testcase name="narrowScreenLargeFont" classname="org.multidns.app.AppUiTest" time="1.631" />
+  <system-out />
+  <system-err>Invalid ID 0x00000000.
 Invalid ID 0x00000000.
 Invalid ID 0x00000000.
 Invalid ID 0x00000000.
-]]></system-err>
+</system-err>
 </testsuite>

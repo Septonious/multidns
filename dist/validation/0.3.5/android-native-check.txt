@@ -1,0 +1,2 @@
+PASS arm64-v8a: HEV C API and MultiDNS JNI bridge
+PASS x86_64: HEV C API and MultiDNS JNI bridge

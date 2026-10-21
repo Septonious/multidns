@@ -1,3 +1,1 @@
-Android lintDebug: 0 errors / 18 warnings.
-Both native UI tests: 2 tests / 0 failures / 0 errors.
-APK: versionName 0.3.5 / versionCode 12 / 13971676 bytes.
+Android lint: 0 errors, 18 warnings.

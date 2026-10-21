@@ -85,6 +85,15 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 	return settings.TXWorkers == 0 || p.flight-p.reads < settings.TXWorkers
 }
 func (c *Client) leasePathLocked(addr string, op byte, bulk bool) func() {
+	p := c.reservePathLocked(addr, op, bulk)
+	return func() {
+		c.adaptiveMu.Lock()
+		c.releasePathLocked(p, op, bulk)
+		c.adaptiveMu.Unlock()
+	}
+}
+
+func (c *Client) reservePathLocked(addr string, op byte, bulk bool) *pathState {
 	p := c.pathLocked(addr)
 	c.leasedData++
 	p.flight++
@@ -95,21 +104,21 @@ func (c *Client) leasePathLocked(addr string, op byte, bulk bool) func() {
 		p.reads++
 		c.leasedReads++
 	}
-	return func() {
-		c.adaptiveMu.Lock()
-		p.flight--
-		c.leasedData--
-		if bulk {
-			p.bulk--
-		}
-		if op == opRead {
-			p.reads--
-			c.leasedReads--
-		}
-		p.signal()
-		c.wakeAdmissionsLocked()
-		c.adaptiveMu.Unlock()
+	return p
+}
+
+func (c *Client) releasePathLocked(p *pathState, op byte, bulk bool) {
+	p.flight--
+	c.leasedData--
+	if bulk {
+		p.bulk--
 	}
+	if op == opRead {
+		p.reads--
+		c.leasedReads--
+	}
+	p.signal()
+	c.wakeAdmissionsLocked()
 }
 func (c *Client) tryPath(addr string, op byte, streams ...uint32) (func(), error) {
 	c.adaptiveMu.Lock()
@@ -282,10 +291,14 @@ func (c *Client) nextAdmissionLocked() *admission {
 	if c.admissionChoiceValid && now.Sub(c.admissionChoiceAt) < 10*time.Millisecond {
 		return c.admissionChoice
 	}
-	available := map[int]bool{}
-	checked := map[int]bool{}
+	// Only four data classes exist: short/bulk TX and short/bulk RX. Cache
+	// their readiness without hashing two maps for every queued request.
+	var available, checked [4]bool
 	ready := func(a *admission) bool {
-		class := int(a.op) * 2
+		class := 0
+		if a.op == opRead {
+			class = 2
+		}
 		if a.bulk {
 			class++
 		}
@@ -325,13 +338,12 @@ func (c *Client) nextAdmissionLocked() *admission {
 }
 
 func (c *Client) leaseFlowLocked(addr string, op byte, bulk bool, stream uint32) func() {
-	release := c.leasePathLocked(addr, op, bulk)
+	p := c.reservePathLocked(addr, op, bulk)
 	if c.flowFlight == nil {
 		c.flowFlight = map[flowKey]int{}
 	}
 	key := flowKey{stream, op}
 	c.flowFlight[key]++
-	p := c.pathLocked(addr)
 	if p.streams == nil {
 		p.streams = map[uint32]int{}
 	}
@@ -346,8 +358,10 @@ func (c *Client) leaseFlowLocked(addr string, op byte, bulk bool, stream uint32)
 		if c.flowFlight[key] == 0 {
 			delete(c.flowFlight, key)
 		}
-		c.wakeAdmissionsLocked()
+		// Publish stream fairness and physical capacity together. Waking before
+		// releasing the path scanned the entire admission queue twice per reply,
+		// and exposed a half-released lease to the selected worker.
+		c.releasePathLocked(p, op, bulk)
 		c.adaptiveMu.Unlock()
-		release()
 	}
 }

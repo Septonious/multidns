@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Septonious/multidns/core
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkAdmissionRelease-2   	  121010	      4430 ns/op
+BenchmarkAdmissionRelease-2   	  115564	      4568 ns/op
+BenchmarkAdmissionRelease-2   	   98532	      6093 ns/op
+BenchmarkAdmissionRelease-2   	  107402	      5393 ns/op
+BenchmarkAdmissionRelease-2   	  109858	      6274 ns/op
+PASS
+ok  	github.com/Septonious/multidns/core	3.723s

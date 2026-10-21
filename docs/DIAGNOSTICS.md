@@ -1,4 +1,4 @@
-# Resolvers and diagnostics (0.3.5)
+# Resolvers and diagnostics (0.3.6)
 
 ## Automatic transport
 
@@ -77,8 +77,16 @@ During a connection, the test interface is replaced by slim resolver cards:
 - Current transport (UDP or TCP) and unique stream count on outstanding assignments.
   Several chunks or directions of the same stream count once. Striping can
   place one stream on multiple resolvers; counts need not sum to global streams.
-- Green: reachable/active. Yellow: checking, standby, recent loss or degraded
-  read/delay behavior. Red: confirmed unavailable.
+- Green: reachable/active. Yellow: checking, standby, **Recent loss**,
+  **Download limited** (a temporary RX cooldown), or **High latency**. Red:
+  confirmed unavailable. A recent error is not a confirmed outage.
+
+There is no ten-stream limit. A 44 ms path can legitimately carry twelve streams
+while a recent lost exchange makes its card yellow. These are unique stream IDs
+with outstanding physical requests, not twelve pinned TCP connections. New work
+is governed by learned request capacity, directional limits, physical requests
+in flight and cooldowns. A failed or capacity-limited path cannot collect queued
+work beyond admission limits; already-sent work drains or retries elsewhere.
 
 One lost exchange briefly pauses the affected direction for 25..100 ms and
 redistributes waiting work. It does not toggle reachability. Three consecutive failures with

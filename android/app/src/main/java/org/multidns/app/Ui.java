@@ -9,14 +9,14 @@ import android.widget.*;
 
 /** Small native design system. No web views or third-party UI runtime. */
 final class Ui {
-  static final int BG = 0xff0b1020,
-      INK = 0xffedf2ff,
-      MUTED = 0xff93a3bd,
-      ACCENT = 0xff72bcff,
-      SOFT = 0xff1a2d47,
-      LINE = 0xff26334b,
-      SURFACE = 0xff131c2e,
-      ON_ACCENT = 0xff081d33,
+  static final int BG = 0xff0b1410,
+      INK = 0xffedf7f0,
+      MUTED = 0xffa1b5a8,
+      ACCENT = 0xff74dfa2,
+      SOFT = 0xff18372a,
+      LINE = 0xff2b4135,
+      SURFACE = 0xff121f18,
+      ON_ACCENT = 0xff082315,
       GREEN = 0xff63dba6,
       YELLOW = 0xffffc46b,
       RED = 0xffff7f93,
@@ -49,7 +49,7 @@ final class Ui {
 
   static android.graphics.drawable.Drawable ripple(Context c, int color, int radius, int border) {
     return new RippleDrawable(
-        ColorStateList.valueOf(0x2872bcff), shape(c, color, radius, border), null);
+        ColorStateList.valueOf(0x2874dfa2), shape(c, color, radius, border), null);
   }
 
   static TextView label(Context c, String s, int size, int color, boolean bold) {

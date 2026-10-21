@@ -1,3 +1,61 @@
+# Version 0.3.6 — 21 October 2026
+
+Previous checkpoint: 1ee0ff4 / 0.3.5. Latest user phone runs: single groups
+14.0/5.25 Mbps, idle/download-loaded/upload-loaded 49/273/60 ms; pairs
+15.5/5.47 Mbps, 46/90/58 ms. Reports truncated; do not infer causality from two
+runs. User questioned yellow cards with >10 streams, still wants more upload
+and controlled stability, and explicitly requested green instead of blue theme.
+
+Implemented:
+- Atomic flow/path/global lease return under one lock, one fair queue wake.
+  Remove the old intermediate wake and second full queue scan. Four fixed
+  TX/RX short/bulk readiness flags replace per-waiter hashing of two maps.
+  Capacity limits, per-flow fairness, placement, pacing and ARQ unchanged.
+- Slim yellow cards explain Recent loss, Download limited (RX cooldown) or
+  High latency; high latency takes precedence over recent loss. Red still
+  means confirmed unavailable. No arbitrary ten-stream cap: 12 outstanding
+  stream IDs on a 44 ms path with spare request capacity are valid. IDs can
+  appear on several striped paths; counts are not pinned connection ownership.
+- Entire dark palette now green/mint: Java design constants, native system
+  theme/control/ripple colors, surfaces, borders, spinner and launcher icon.
+  Warning yellow/error red and distinct upload rate coloring preserved.
+- Android 0.3.6 / code 13. No wire/key/profile/HMAC/XOR changes. Existing server
+  works; server binaries rebuilt for parity. UDP preference/TCP fallback retained.
+
+Validation:
+- Complete serialized race suite PASS: core 42.370 s, mobile 1.079 s, followed
+  by vet. Existing fairness, global/directional capacity, failover/recovery,
+  cancellation/physical credits and TCP fallback tests run unchanged. Added
+  card reason/count coverage and a reusable admission release microbenchmark.
+- Five baseline release/selection samples median 20.28 us versus final 5.393 us
+  with 20 paths and 256 waiters. This is scheduler-operation cost, not a 4x
+  bandwidth or whole-process CPU claim. Release-only intermediate was noisy.
+- Final four 20-path SOCKS download→upload→quiet cases (two per singles/pairs)
+  upload 2.91–3.59 Mbps, download 6.08–7.01 Mbps, maximum application echo
+  121.5–159.7 ms, zero health-downs and 0–2 timeouts. SHA-verified payloads.
+  Initial 0.3.5 upload 2.46–3.03 Mbps; results overlap and are short local tests.
+- Preserved rejected directional-capacity/independent-deficit/ACK-clock candidates
+  and release-only intermediates with >500 ms outliers and worse throughput.
+  Repeated unchanged 0.3.5 also had an 8.35 s echo / 28 health-down outlier;
+  cause not established. Do not claim host blame, a solved tail problem or a
+  strict 500 ms guarantee from four final cases. Physical Oppo not tested here.
+- Three CLI compatibility combinations passed authenticated startup and
+  byte-verified 32 KiB HTTP up/down against retained 0.3.5 binaries.
+- Android build/lint PASS (0 errors, 18 warnings); two native UI rendering tests
+  PASS, including green cards at 320 dp / 130% font. Instrumentation compiled
+  only. APK version/code 0.3.6/13, 13971688 bytes, original retained certificate
+  28d3a8d227f63d209bbf4575c128a2546e38e7265e95ec2243886ef5bfbc9c54. Six
+  native libraries pass HEV/JNI and ELF/ZIP 16 KiB checks. All seven SHAs pass.
+
+Build environment and full raw evidence: /workspace/work/multidns-0.3.6-validation.
+Control archive: /workspace/work/multidns-0.3.5-control. Earlier work retained.
+Production env/public listen override must remain unchanged. Adaptive admission
+already spans all active groups. 110 upstream payload bytes versus 768 down
+and the 512 global request ceiling constrain upstream rates. Do not expand
+credits blindly: an earlier 1024 candidate caused severe latency regressions.
+
+---
+
 # Version 0.3.5 — 21 October 2026
 
 Previous checkpoint: b93d06c / 0.3.4. User reports 14.8/3.12 and 16.0/3.66 Mbps,

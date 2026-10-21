@@ -136,13 +136,13 @@ public class AppUiTest {
           new JSONObject()
               .put("endpoint", "192.0.2." + (i + 1) + ":53")
               .put("state", i == 6 ? "yellow" : i == 7 ? "red" : "green")
-              .put("status", i == 6 ? "Degraded" : i == 7 ? "Unavailable" : "Active")
-              .put("streams", i == 7 ? 0 : 3)
+              .put("status", i == 6 ? "Recent loss" : i == 7 ? "Unavailable" : "Active")
+              .put("streams", i == 6 ? 12 : i == 7 ? 0 : 3)
               .put("transport", i == 0 ? "tcp" : "udp")
               .put("rtt_ms", 43 + i * 4));
     TunnelService.stats =
         new JSONObject()
-            .put("transport_version", "0.3.5")
+            .put("transport_version", "0.3.6")
             .put("uploaded", 2200000)
             .put("downloaded", 6960000)
             .put("streams", 8)
@@ -237,6 +237,34 @@ public class AppUiTest {
     render(activity, "narrow-font-130", 320, 720);
     page(activity, "diagnostics");
     render(activity, "diagnostics-narrow-font-130", 320, 720);
+    TunnelService.state = "Connected";
+    TunnelService.instance = new TunnelService();
+    JSONArray live = new JSONArray();
+    String[] reasons = {"Recent loss", "Download limited", "High latency"};
+    for (int i = 0; i < reasons.length; i++)
+      live.put(
+          new JSONObject()
+              .put("endpoint", "192.0.2." + (i + 1) + ":53")
+              .put("state", "yellow")
+              .put("status", reasons[i])
+              .put("streams", 12)
+              .put("rtt_ms", 44));
+    TunnelService.stats = new JSONObject().put("resolvers", live).toString();
+    page(activity, "diagnostics");
+    render(activity, "resolver-reasons-narrow-font-130", 320, 720);
+    java.util.Map<?, ?> rows = (java.util.Map<?, ?>) get(activity, "resolverCards");
+    for (int i = 0; i < reasons.length; i++) {
+      Object card = rows.get("192.0.2." + (i + 1) + ":53");
+      TextView status = (TextView) get(card, "status");
+      assertEquals(reasons[i], status.getText().toString());
+      assertEquals("status clipped", 0, status.getLayout().getEllipsisCount(0));
+      assertTrue(
+          "reason extends outside card",
+          status.getRight() <= ((View) status.getParent()).getWidth());
+    }
+    TunnelService.instance = null;
+    TunnelService.state = "Disconnected";
+    TunnelService.stats = "{}";
     controller.pause().stop().destroy();
     RuntimeEnvironment.setFontScale(1f);
   }

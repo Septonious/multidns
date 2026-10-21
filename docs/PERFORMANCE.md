@@ -1,5 +1,73 @@
 # Performance and tuning
 
+## Version 0.3.6: admission efficiency, resolver states and green theme
+
+The user's 0.3.5 phone measurements were 14.0/5.25 Mbps down/up with single
+resolver groups and 15.5/5.47 Mbps with pairs. Idle/download-loaded/upload-loaded
+RTT was 49/273/60 ms and 46/90/58 ms respectively. These are two user runs,
+not a controlled comparison proving that pairs are faster. The JSON reports
+are truncated. Adaptive data admission already considers the entire active
+pool, independently of the preferred group. Grouping cannot create additional
+physical capacity; different resolver IPs can share network/backend limits.
+
+Upload remains asymmetric: t.atmosl.ink fits 110 useful bytes in each QNAME,
+versus up to 768 downstream bytes. The paired snapshot has 504 of 512 physical
+data slots occupied, 86 by reads, and four active uploads. For illustration,
+512 all-upload requests carrying 110 bytes and turning over every 80 ms would
+carry 5.63 Mbps before loss, pacing and other traffic. This is a rough capacity
+calculation, not a measured RTT for all paths or a hard throughput ceiling.
+Raising the global limit without evidence would ignore the earlier 1024-credit
+regression. Limits, pacing, wire format, authentication and XOR remain unchanged.
+
+0.3.6 removes redundant work instead: flow fairness and physical path/global
+credits are returned under one lock, followed by one admission wake/selection.
+The prior split release scanned the queue twice and exposed partially updated
+accounting between lock acquisitions. Four fixed readiness flags replace two
+maps hashed for every queued request. Existing per-flow fairness, global/path
+budgets, direction-specific admission and failure redistribution remain intact.
+
+A 20-path, 256-waiter release/selection microbenchmark measured five baseline
+samples at 19.5–25.0 microseconds (median 20.28), versus five final samples at
+4.43–6.27 microseconds (median 5.393). This measures one scheduler operation,
+not complete request CPU or phone bandwidth. The same fixture verifies no
+flow/global credit leak. A release-only intermediate had noisy overlapping
+14.8–26.8 microsecond timings; the final fixed readiness cache supplies the
+clearer reduction.
+
+More aggressive directional re-ranking and independent TX/RX deficit candidates
+were rejected after latency/throughput regressions. Their logs are retained.
+Even unchanged 0.3.5 later produced an 8.35-second application echo and 28 health
+downs in the transition stress fixture, compared with its first four cases at
+153.7–240.8 ms and zero downs. The cause of this variability is not established;
+do not blame it on the host or claim the new release solves it. Local synthetic
+results are not a guarantee of staying below 500 ms on a real network.
+
+The dark palette now uses green surfaces and mint accents throughout primary
+buttons, selection/navigation, controls, ripple feedback and the launcher icon.
+Yellow and red retain their warning/error meaning.
+
+The final four 20-path SOCKS transition cases (two per layout) measured:
+
+| Group size | 0.3.5 initial upload Mbps | 0.3.6 upload Mbps | 0.3.6 download Mbps | Final maximum application echo ms |
+|---:|---:|---:|---:|---:|
+| 1 | 2.46–2.57 | 2.91–3.48 | 6.82–7.01 | 142.8 |
+| 2 | 2.71–3.03 | 2.98–3.59 | 6.08–6.38 | 159.7 |
+
+All four final cases had zero health-down transitions and 0–2 timeouts. This
+is the existing 3 x 512 KiB download → 3 x 256 KiB SHA-verified upload → quiet
+fixture with eight idle SOCKS sessions, sparse downstream loss and queueing.
+The source and traffic match the baseline. These short results overlap and
+must be read with the baseline/candidate outliers above. They establish neither
+a maximum speed nor a phone RTT guarantee. The complete serialized race suite
+passed (core 42.370 s, mobile 1.079 s), followed by vet.
+
+Yellow cards now say Recent loss, Download limited or High latency rather than
+Degraded. Twelve assigned streams on a 44 ms path are valid: the count means
+unique streams with outstanding physical requests, not pinned connections or
+an overload threshold. Reachability and request-capacity control determine
+admission. A stream can appear on several striped paths. High latency takes
+precedence over the recent-loss label; confirmed unavailability stays red.
+
 ## Version 0.3.5: continuous SOCKS uploads and directional control
 
 The user's 0.3.4 phone tests measured 14.8/3.12 and 16.0/3.66 Mbps down/up,
