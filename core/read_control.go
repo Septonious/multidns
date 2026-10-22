@@ -75,7 +75,7 @@ func (c *Client) updateReadCapacityLocked(addr string, p *pathState, size int, e
 			return
 		}
 	}
-	if now.Sub(r.lastCut) < 300*time.Millisecond || now.Add(-elapsed).Before(r.lastCut) {
+	if now.Before(p.recoveryUntil) || now.Sub(r.lastCut) < 300*time.Millisecond || now.Add(-elapsed).Before(r.lastCut) {
 		return
 	}
 	r.successes++

@@ -12,11 +12,13 @@ import (
 )
 
 type pendingDNS struct {
-	question string
-	reply    chan *dns.Msg
-	done     chan struct{}
-	timer    *time.Timer
-	err      error
+	question  string
+	reply     chan *dns.Msg
+	done      chan struct{}
+	timer     *time.Timer
+	err       error
+	abandoned bool // guarded by resolverSocket.mu
+	lateReply func(*dns.Msg)
 }
 type resolverSocket struct {
 	serial  chan struct{}
@@ -155,6 +157,7 @@ func (s *resolverSocket) readLoop() {
 		if !m.Response || len(m.Question) > 1 {
 			continue
 		}
+		var late func(*dns.Msg)
 		s.mu.Lock()
 		p, ok := s.pending[m.Id]
 		// DNS names are case-insensitive. Some recursors normalize case.
@@ -162,9 +165,15 @@ func (s *resolverSocket) readLoop() {
 		// the subsequent fully authenticated response can complete the RPC.
 		match := ok && len(m.Question) == 1 && m.Question[0].Qtype == dns.TypeTXT && m.Question[0].Qclass == dns.ClassINET && strings.EqualFold(p.question, m.Question[0].Name)
 		if ok && (match || len(m.Question) == 0 && m.Truncated) {
+			if p.abandoned {
+				late = p.lateReply
+			}
 			s.finishLocked(m.Id, p, m, nil)
 		}
 		s.mu.Unlock()
+		if late != nil {
+			late(m)
+		}
 	}
 }
 func (c *Client) exchangeUDP(ctx context.Context, m *dns.Msg, addr string) (*dns.Msg, error) {
@@ -268,24 +277,76 @@ func (c *Client) exchangeDNSTracked(ctx context.Context, m *dns.Msg, addr, netwo
 	}
 	timeout := c.exchangeTimeout(addr, operation)
 	deadline := time.Now().Add(timeout)
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+	if d, ok := ctx.Deadline(); s.network != "tcp" && ok && d.Before(deadline) {
 		deadline = d
 	}
+	if err := ctx.Err(); err != nil {
+		<-s.write
+		return nil, err, p.done
+	}
+	wireStarted := time.Now()
 	s.mu.Lock()
-	p.timer = time.AfterFunc(timeout, func() { s.mu.Lock(); s.finishLocked(id, p, nil, context.DeadlineExceeded); s.mu.Unlock() })
+	if c.Profile.Adaptive && (operation == opRead || operation == opWrite) {
+		p.lateReply = func(reply *dns.Msg) { c.recordLateDNSReply(addr, operation, wireStarted, m, reply) }
+	}
+	p.timer = time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		timedOut := s.pending[id] == p
+		abandoned := p.abandoned
+		s.finishLocked(id, p, nil, context.DeadlineExceeded)
+		s.mu.Unlock()
+		// Cancellation abandons the caller, not the physical DNS request.
+		// Its eventual loss still informs congestion control, but never
+		// reachability or consecutive failure/health-down accounting.
+		if timedOut && abandoned && c.ctx.Err() == nil {
+			c.recordAbandonedTimeout(addr, operation, wireStarted)
+		}
+	})
 	s.mu.Unlock()
 	sent = true
-	_ = s.conn.SetWriteDeadline(deadline)
-	e = (&dns.Conn{Conn: s.conn}).WriteMsg(m)
-	<-s.write
-	if e != nil {
-		s.closeWithError(e)
-		return nil, e, p.done
+	write := func() error {
+		_ = s.conn.SetWriteDeadline(deadline)
+		err := (&dns.Conn{Conn: s.conn}).WriteMsg(m)
+		<-s.write
+		if err != nil {
+			// UDP writes are atomic. A caller's expired deadline cannot
+			// corrupt framing and must not tear down other transactions.
+			if s.network == "udp" && ctx.Err() != nil {
+				s.mu.Lock()
+				s.finishLocked(id, p, nil, err)
+				s.mu.Unlock()
+			} else {
+				s.closeWithError(err)
+			}
+		}
+		return err
+	}
+	if s.network == "tcp" {
+		// Keep the physical frame bounded by its own deadline. A short-lived
+		// speculative caller can stop waiting without interrupting a partial
+		// frame and needlessly reconnecting a healthy shared TCP socket.
+		go func() { _ = write() }()
+	} else if err := write(); err != nil {
+		return nil, err, p.done
 	}
 	select {
 	case answer := <-p.reply:
 		return answer, nil, p.done
 	case <-ctx.Done():
+		var completed *dns.Msg
+		s.mu.Lock()
+		if s.pending[id] == p {
+			p.abandoned = true
+		} else {
+			select {
+			case completed = <-p.reply:
+			default:
+			}
+		}
+		s.mu.Unlock()
+		if completed != nil && p.lateReply != nil {
+			p.lateReply(completed)
+		}
 		return nil, ctx.Err(), p.done
 	case <-c.ctx.Done():
 		return nil, net.ErrClosed, p.done

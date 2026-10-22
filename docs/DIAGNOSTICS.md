@@ -1,4 +1,4 @@
-# Resolvers and diagnostics (0.3.6)
+# Resolvers and diagnostics (0.3.7)
 
 ## Automatic transport
 
@@ -103,6 +103,19 @@ opening extra probe sockets. Idle, spare and failed paths retain background
 recovery checks. Speculative future reads expire after 350 ms without turning
 that expiry into a connection error; the idle head remains available.
 
+The dashboard counts an explicit `reachable` field, independently of a card's
+color or label. High latency, recent loss and a temporary download cooldown do
+not make a responding resolver unresponsive. Checking/confirmed outages remain
+excluded. Grouping descriptions refer to the active pool and standby failover;
+groups do not create additional independent bandwidth.
+
+Confirmed outage retries back off from 500 ms to at most 8 seconds. Authenticated
+recovery retains cumulative diagnostics, clears old congestion/pacing history,
+starts with at most four physical requests and holds growth for two seconds.
+Replies from before the outage cannot restore capacity; late failures from
+before recovery cannot restart the failure episode. Failed probes predating
+newer authenticated progress cannot erase it.
+
 ## Debug capture
 
 **Debug capture** is off by default. Ordinary Android operation serializes a
@@ -148,3 +161,27 @@ framing. XOR does not change those sizes or remove existing application TLS byte
 Authentication remains enabled, including over the obfuscation flag/ciphertext.
 A separate nonce-derived mask avoids exposing the authentication key through
 known plaintext; repeating the mask still does not make XOR a secure cipher.
+
+### New 0.3.7 fields
+
+- `read_budget`: current learned global RX request budget (initial 160, up to
+  320 with the new server); `peer_read_window`: negotiated per-connection cache
+  window (64 legacy, 128 new). Shared data requests remain capped at 512.
+- `late_replies`, global and per resolver: authenticated replies after a data
+  caller stopped waiting. They update delay and reachability after request/nonce
+  validation, but do not add delivered application bytes or grow the global RX
+  budget. Pre-outage replies cannot reopen the circuit.
+- `abandoned_timeouts`, both global and per resolver: actual physical timeouts
+  after a data caller stopped waiting, excluding stale outage epochs/shutdown.
+  These feed congestion control but do not increment consecutive reachability
+  failures or health-down transitions. They are distinct from normal `timeouts`.
+- `recovery_ms` and `retry_ms`: remaining recovery growth grace and assignment
+  cooldown. These appear only in the optional detailed resolver report.
+
+The RX budget grows by 16 only with substantial occupancy, payload progress and
+low recent physical loss; persistent delay or substantial aggregate loss withdraws credits. The global
+loss cut requires a full 256-outcome sample with at least 8% loss; ordinary
+per-path loss remains handled by individual controllers and ARQ.
+Smaller path limits remain authoritative. A configured short timeout remains
+a hard ceiling, including in TCP mode. Normal snapshots remain slim and debug
+capture stays disabled by default.

@@ -43,13 +43,19 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.3.6 keeps the compact
+amd64/arm64 server, client, and scanner binaries. Version 0.3.7 keeps the compact
 dark green interface and automatic resolver control. The **Resolvers** tab offers
 ICMP + authenticated E2E tests while disconnected, then slim live cards with
 latency, stream assignments, UDP/TCP transport and status. Detailed debug
 capture remains off by default; normal snapshots stay small. Yellow cards now
 name recent loss, a download cooldown or high latency. Stream counts describe
 outstanding work and do not imply a fixed ten-stream limit.
+
+Update the server and APK together to enable the new download window. Version
+0.3.7 negotiates 128 cached chunks per connection and grows the shared RX
+budget from 160 toward 320 only under successful sustained demand. Older
+servers remain compatible at their existing 64-chunk / 160-request limits.
+The main-page reachable count now includes responding high-latency resolvers.
 
 The SOCKS upload pipeline now spans local TCP read boundaries, without a flush
 round trip after every buffer. Separate TX/RX feedback prevents lost downloads
@@ -59,6 +65,11 @@ both group layouts under the same control. Flow and physical lease release now
 wake the admission queue once, with a small fixed readiness cache for TX/RX
 traffic classes. Health confirmation tolerates a
 single batch of simultaneous expirations and one failed post-load probe cycle.
+Confirmed failures back off, and authenticated recovery starts with at most four
+requests plus a short growth grace. Stale replies cannot restore an old burst
+window. Physical losses of abandoned requests inform congestion without
+changing reachability. Shared TCP frames can finish after caller cancellation.
+The server batches TCP reads and notifies only the requested chunk waiters.
 
 UDP/53 is preferred. Authenticated TCP/53 fallback covers unavailable UDP as well
 as truncated responses, reuses bounded protected connections, and periodically

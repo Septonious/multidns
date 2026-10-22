@@ -1,5 +1,89 @@
 # Performance and tuning
 
+## Version 0.3.7: complete physical feedback and a wider download pipeline
+
+The user reports a 10–15 Mbps ceiling (often 6–7 Mbps), repeated resolver
+fall/recovery after speedtests until manual reconnect, and high-latency yellow
+cards incorrectly reducing the dashboard reachable count. This release treats
+reachability separately from quality and records physical completions that
+outlive speculative callers. It does not promise linear scaling with addresses.
+
+Changes:
+- Authenticate late replies against the original request/session/stream/sequence/
+  nonce before using them as delay/progress. Do not count them as application
+  goodput or global window-growth successes. Physical abandoned-request timeouts
+  feed congestion but not consecutive reachability failures. Classify abandonment
+  explicitly under the socket lock so a normal timeout is not counted again when
+  its caller cleans up.
+- Confirmed outage clears the overloaded window, pacing and old loss clock, with
+  at most four requests on authenticated recovery and a two-second growth grace.
+  Retry backs off 500 ms → 8 s. Stale successes/failures and failed probes older
+  than newer progress cannot restart or overwrite the episode.
+- TCP frame writes have their own bounded physical deadline. Caller cancellation
+  can return promptly while a frame completes, retaining physical/serial credit;
+  it cannot truncate a shared stream and provoke a needless reconnect. Canceled
+  atomic UDP writes do not close unrelated pending transactions on that socket.
+- Additive negotiation supports 128 cached downstream chunks instead of 64. The
+  new server has 512 total / 384 read handlers, bounded TCP read batches, monotone
+  ACK deletion, separate producer credit and per-sequence data notifications.
+  ACKs and unrelated chunks no longer wake all long-polls. Idle/expired waiters
+  are reference-counted and removed; close/EOF/error wakes remaining readers.
+- Client RX budget starts at 160 and can grow toward 320 under successful demand
+  and low recent physical loss. A full-window 8% aggregate loss sample or sustained
+  excess RTT withdraws global credit; ordinary ARQ loss does not compound every
+  individual path cut. Total data credits stay 512, paths keep their own limits.
+  Small interactive replies do not retain a bulk reader's equal share. Delayed
+  interactive backups can use reserved foreground credits ahead of queued bulk,
+  while queued foreground work has priority. Their timer is bounded by half the
+  configured loaded-RTT target. Older servers retain 64 / 160 behavior.
+- Explicit reachability drives the dashboard count, including responding yellow
+  cards. The group editor now describes the shared active pool and spares rather
+  than claiming that groups define data backups. Green theme/debug defaults stay.
+
+### Local evidence and limits
+
+All fixtures run on the same two-CPU host with both client and simulated resolvers/
+server present. These are not Oppo, mobile-radio or production resolver tests.
+The sustained fixture uses 36 paths at 35–95 ms, four concurrent SHA-verified
+2 MiB downloads then four 512 KiB uploads, repeated twice, eight idle SOCKS
+connections and a separate application echo. The stress version additionally
+loses every 67th read and queues service above its per-path thresholds.
+
+An unchanged 0.3.6 healthy-capacity case measured 11.80/2.902 Mbps down/up,
+109.7 ms p95 echo, 1127 ms maximum, zero health-downs and 243 timeouts. The
+late-completion candidate measured 14.43/3.873 Mbps, 106.9 ms p95 / 669.4 ms max,
+zero health-downs and seven normal plus forty abandoned timeouts. That candidate
+precedes the final aggregate-loss threshold change; do not label it an exact
+final build or a controlled physical-phone improvement.
+
+The exact final-source healthy-capacity run measured 13.13/2.522 Mbps,
+159.9 ms p95 / 775.7 ms maximum, four health-downs, and 155 normal plus
+97 abandoned timeouts. Compared with the baseline above, upload and status
+transitions regressed in this run despite a higher download. This result
+supersedes the earlier candidate as evidence for the shipped source; no
+consistent throughput or complete post-load stability improvement is established.
+
+The exact final-policy stress case measured 6.766/2.145 Mbps, 228.9 ms p95 /
+1489 ms maximum echo, zero health-downs, 337 normal plus 466 abandoned timeouts.
+The original stress group-of-two baseline was 8.094/1.656 Mbps, 212.1 ms p95 /
+723.8 ms max, five health-downs and 368 timeouts. Throughput/tail results are
+mixed: recovery transitions improve in this sample, but loss and RTT spikes
+remain. The 500 ms target is not a demonstrated hard bound. Global backoff and
+per-path discovery still require real-network measurement.
+
+Intermediate candidates include 33 health-down transitions despite a higher
+16.53 Mbps download. They are not the shipped algorithm. Earlier complete-suite
+runs had intermittent collapsed-capacity HTTPS/backpressure failures; isolated
+rechecks passed. They remain in the evidence, and no proven common cause is
+claimed. After per-sequence notification and complete physical feedback, the
+full race suite passed (44.323 s); exact final loss-policy source passed again
+(51.221 s), followed by vet. The TCP fixture formerly used a 150 ms hard timeout
+for 15 ms service plus deliberate 80 ms server wait; intermittent zero-timeout/
+connection-count assertions were retained as failures. Its budget is now 400 ms
+with the original zero-timeout/bounded-connection checks unchanged. Three repeats
+of cancellation/TCP tests passed; the blocked-frame reuse and late-authentication
+regressions exercise the actual fixes independently of that timing adjustment.
+
 ## Version 0.3.6: admission efficiency, resolver states and green theme
 
 The user's 0.3.5 phone measurements were 14.0/5.25 Mbps down/up with single

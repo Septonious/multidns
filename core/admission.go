@@ -39,7 +39,7 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 	if bulk && cap(c.dataSlots) > 32 && c.leasedData >= cap(c.dataSlots)-8 {
 		return false
 	}
-	if op == opRead && cap(c.readSlots) > 0 && c.leasedReads >= cap(c.readSlots) {
+	if op == opRead && c.readBudget() > 0 && c.leasedReads >= c.readBudget() {
 		return false
 	}
 	p := c.pathLocked(addr)
@@ -133,18 +133,21 @@ func (c *Client) tryPath(addr string, op byte, streams ...uint32) (func(), error
 	return c.leaseFlowLocked(addr, op, true, stream), nil
 }
 
-// Opportunistic redundancy never jumps ahead of queued unique work, and its
-// physical lease is held until the original DNS exchange has actually ended.
-func (c *Client) tryAlternative(primary string, op byte, stream uint32) (string, func(), error) {
+// Bulk redundancy never jumps queued work. A delayed interactive backup may
+// use the reserved foreground credits ahead of bulk, but not queued foreground
+// work. Every backup retains its physical lease until wire completion.
+func (c *Client) tryAlternative(primary string, op byte, stream uint32, bulk bool) (string, func(), error) {
 	c.adaptiveMu.Lock()
 	defer c.adaptiveMu.Unlock()
-	if len(c.admissions) > 0 {
-		return "", nil, errPathBusy
+	for _, a := range c.admissions {
+		if bulk || !a.bulk {
+			return "", nil, errPathBusy
+		}
 	}
 	best, cost := "", math.MaxFloat64
 	for _, g := range c.groups {
 		for _, addr := range g.Resolvers {
-			if addr == primary || !c.pathAvailableLocked(addr, op, true) {
+			if addr == primary || !c.pathAvailableLocked(addr, op, bulk) {
 				continue
 			}
 			p := c.pathLocked(addr)
@@ -166,7 +169,7 @@ func (c *Client) tryAlternative(primary string, op byte, stream uint32) (string,
 	if best == "" {
 		return "", nil, errPathBusy
 	}
-	return best, c.leaseFlowLocked(best, op, true, stream), nil
+	return best, c.leaseFlowLocked(best, op, bulk, stream), nil
 }
 
 // One shared admission queue with per-flow fairness replaces hundreds of requests

@@ -28,7 +28,26 @@ func BenchmarkPoolTransitions(b *testing.B) {
 		}
 	}
 }
-func benchmarkPoolTransitions(b *testing.B, count, size int) {
+func BenchmarkLargePoolSustained(b *testing.B) {
+	for _, size := range []int{2, 4} {
+		b.Run(fmt.Sprintf("paths-36/group-%d", size), func(b *testing.B) { benchmarkPoolTransitions(b, 36, size, 2048, 512, 4, 2) })
+	}
+}
+func BenchmarkLargePoolCapacity(b *testing.B) {
+	b.Run("paths-36/group-2", func(b *testing.B) { benchmarkPoolTransitions(b, 36, 2, 2048, 512, 4, 2, 0, 0) })
+}
+func benchmarkPoolTransitions(b *testing.B, count, size int, options ...int) {
+	downKB, upKB, parallel, cycles := 512, 256, 3, 1
+	lossEvery, queued := int64(67), true
+	if len(options) > 0 {
+		downKB, upKB, parallel, cycles = options[0], options[1], options[2], options[3]
+	}
+	if len(options) > 4 {
+		lossEvery = int64(options[4])
+	}
+	if len(options) > 5 {
+		queued = options[5] != 0
+	}
 	p, server := testProfile(b)
 	p.Adaptive = true
 	p.TimeoutMS = 1000
@@ -40,14 +59,19 @@ func benchmarkPoolTransitions(b *testing.B, count, size int) {
 			f, _ := extract(m, p.Domain, p.Key)
 			n := all.Add(1)
 			defer all.Add(-1)
-			extra := time.Duration(max(0, n-40)) * 3 * time.Millisecond
+			extra := time.Duration(0)
+			if queued {
+				extra = time.Duration(max(0, n-40)) * 3 * time.Millisecond
+			}
 			if f.Op == opRead {
-				if received.Add(1)%67 == 0 {
+				if lossEvery > 0 && received.Add(1)%lossEvery == 0 {
 					return
 				}
 				r := reads.Add(1)
 				defer reads.Add(-1)
-				extra += time.Duration(max(0, r-8)) * 9 * time.Millisecond
+				if queued {
+					extra += time.Duration(max(0, r-8)) * 9 * time.Millisecond
+				}
 			}
 			time.Sleep(delay + extra)
 			server.ServeDNS(w, m)
@@ -62,6 +86,7 @@ func benchmarkPoolTransitions(b *testing.B, count, size int) {
 		b.Fatal(err)
 	}
 	defer c.Close()
+	c.SetDiagnostics(false)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -89,11 +114,11 @@ func benchmarkPoolTransitions(b *testing.B, count, size int) {
 	}
 	defer interactive.Close()
 	interactive.SetDeadline(time.Now().Add(95 * time.Second))
-	payload := make([]byte, 512*1024)
+	payload := make([]byte, downKB*1024)
 	for i := range payload {
 		payload[i] = byte(i*19 + i/257)
 	}
-	upload := payload[:256*1024]
+	upload := payload[:upKB*1024]
 	digest := fmt.Sprintf("%x", sha256.Sum256(upload))
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
@@ -158,8 +183,8 @@ func benchmarkPoolTransitions(b *testing.B, count, size int) {
 	defer finish()
 	phase := func(up bool) time.Duration {
 		at := time.Now()
-		errs := make(chan error, 3)
-		for range 3 {
+		errs := make(chan error, parallel)
+		for range parallel {
 			go func() {
 				var r *http.Response
 				var e error
@@ -179,7 +204,7 @@ func benchmarkPoolTransitions(b *testing.B, count, size int) {
 				errs <- e
 			}()
 		}
-		for range 3 {
+		for range parallel {
 			if e := <-errs; e != nil {
 				b.Fatal(e)
 			}
@@ -188,15 +213,15 @@ func benchmarkPoolTransitions(b *testing.B, count, size int) {
 	}
 	var down, up time.Duration
 	b.ResetTimer()
-	for range b.N {
+	for range b.N * cycles {
 		down += phase(false)
 		up += phase(true)
 	}
 	b.StopTimer()
 	time.Sleep(600 * time.Millisecond)
 	finish()
-	b.ReportMetric(float64(3*len(payload)*b.N)*8/down.Seconds()/1e6, "download-Mbps")
-	b.ReportMetric(float64(3*len(upload)*b.N)*8/up.Seconds()/1e6, "upload-Mbps")
+	b.ReportMetric(float64(parallel*len(payload)*b.N*cycles)*8/down.Seconds()/1e6, "download-Mbps")
+	b.ReportMetric(float64(parallel*len(upload)*b.N*cycles)*8/up.Seconds()/1e6, "upload-Mbps")
 	mu.Lock()
 	sort.Float64s(samples)
 	if len(samples) > 0 {
@@ -205,6 +230,9 @@ func benchmarkPoolTransitions(b *testing.B, count, size int) {
 		b.ReportMetric(float64(len(samples)), "app-samples")
 	}
 	mu.Unlock()
+	b.ReportMetric(float64(c.readBudget()), "read-budget")
+	b.ReportMetric(float64(c.peerReadWindow.Load()), "peer-read-window")
+	b.ReportMetric(float64(c.Stats().AbandonedTimeouts), "abandoned-timeouts")
 	b.ReportMetric(float64(c.Stats().Retries), "retries")
 	b.ReportMetric(float64(c.Stats().Timeouts), "timeouts")
 	downs := uint64(0)

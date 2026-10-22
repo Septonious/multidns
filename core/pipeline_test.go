@@ -280,6 +280,11 @@ func TestRollingWindowResumesAfterReaderBackpressure(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	out := make([]byte, len(payload))
 	if _, err := io.ReadFull(conn, out); err != nil {
+		select {
+		case writeErr := <-written:
+			t.Logf("writer completion: %v", writeErr)
+		default:
+		}
 		t.Log("client:", c.StatsJSON())
 		server.mu.Lock()
 		for key, stream := range server.streams {

@@ -1,0 +1,9 @@
+?   	github.com/Septonious/multidns/cmd/client	[no test files]
+?   	github.com/Septonious/multidns/cmd/scanner	[no test files]
+?   	github.com/Septonious/multidns/cmd/server	[no test files]
+--- FAIL: TestTCPOnlyResolverStartupTransferAndUDPRecovery (4.97s)
+    path_transport_test.go:78: TCP not learned/reused: {AbandonedTimeouts:3 RecoveryMS:0 RetryMS:0 Transport:tcp UDPTimeouts:1 UDPSocketErrors:0 TransportSwitches:1 RXCapacity:1 TXCapacity:4 RXCapacityLossCuts:3 RXCapacityDelayCuts:0 AssignedStreams:1 TXQueries:173 RXQueries:140 TXTimeouts:0 RXTimeouts:2 HealthDowns:0 SlotWaitMS:4.886070013143551 MaxSlotWaitMS:216.081 PacingWaitMS:1.567510406451452 PacedQueries:143 RecentLossPercent:0 CapacityBudgetCuts:0 TCPFallbackFailures:0 ReadCooldownMS:0 CapacityLossCuts:0 CapacityDelayCuts:0 CapacityRecoveries:0 Queries:315 Replies:311 Retransmissions:0 Hedges:0 Reconnections:0 Connections:7 Recoveries:0 TCPFallbacks:1 Uploaded:19456 Downloaded:19456 QueueMS:51.27286999015593 MaxQueueMS:264.527 MinRTTMS:15.333 MTU:1232 TXWorkers:0 RXWorkers:0 Timeouts:2 DNSErrors:0 InvalidReplies:0 SocketErrors:0 LastError:DNS exchange timed out Capacity:30 WireInFlight:1 Queued:0 RTTVarianceMS:7.247007149213066 Endpoint:127.0.0.1:41975 RTTMS:21.815673695596423 Goodput:5793.768963039693 UploadRate:5793.768963039693 DownloadRate:5233.745270727938 Failures:0 Healthy:true InFlight:0 Checked:2026-10-22 19:45:29.817754169 +0000 UTC m=+34.793192650}
+FAIL
+FAIL	github.com/Septonious/multidns/core	53.900s
+ok  	github.com/Septonious/multidns/mobile	1.059s
+FAIL

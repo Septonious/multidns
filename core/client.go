@@ -19,11 +19,15 @@ import (
 
 type Protector interface{ Protect(fd int) bool }
 type Stats struct {
-	SessionSeconds float64 `json:"session_seconds"`
-	DataBudget     int     `json:"data_budget"`
-	DataInFlight   int     `json:"data_in_flight"`
-	ReadInFlight   int     `json:"read_in_flight"`
-	ActiveUploads  int64   `json:"active_uploads"`
+	LateReplies       uint64  `json:"late_replies"`
+	AbandonedTimeouts uint64  `json:"abandoned_timeouts"`
+	ReadBudget        int     `json:"read_budget"`
+	PeerReadWindow    uint32  `json:"peer_read_window"`
+	SessionSeconds    float64 `json:"session_seconds"`
+	DataBudget        int     `json:"data_budget"`
+	DataInFlight      int     `json:"data_in_flight"`
+	ReadInFlight      int     `json:"read_in_flight"`
+	ActiveUploads     int64   `json:"active_uploads"`
 
 	UploadPayloadBytes int    `json:"upload_payload_bytes"`
 	LoadedRTTLimitMS   int    `json:"loaded_rtt_limit_ms"`
@@ -48,6 +52,11 @@ type Stats struct {
 	Streams    int64  `json:"streams"`
 }
 type Client struct {
+	lateReplies             atomic.Uint64
+	abandonedTimeouts       atomic.Uint64
+	rxBudget                atomic.Int64
+	rxControl               readBudgetControl
+	peerReadWindow          atomic.Uint32
 	diagnostics             atomic.Bool
 	started                 time.Time
 	leasedData, leasedReads int
@@ -115,11 +124,12 @@ func NewClientContext(parent context.Context, p Profile, protector Protector) (*
 		// Only independent path credits grow: idle polls retain their global cap.
 		// A large pool must not inherit the same TX ceiling as four groups.
 		dataBudget = min(512, max(240, 64*len(p.ResolverPool())))
-		globalBudget, readBudget = dataBudget+16, 160
+		globalBudget, readBudget = dataBudget+16, 320
 	}
 	c := &Client{started: time.Now(), Profile: p, dialer: &net.Dialer{Timeout: 10 * time.Second}, ctx: ctx, cancel: cancel, slots: make(chan struct{}, globalBudget), names: map[string]nameEntry{}, sockets: map[string]*resolverSocket{}}
 	// Idle download polls must leave capacity for uploads and control requests.
 	c.readSlots = make(chan struct{}, readBudget)
+	c.rxBudget.Store(int64(min(readBudget, 160)))
 	c.dataSlots = make(chan struct{}, dataBudget)
 	c.socketOpened = map[string]bool{}
 	c.diagnostics.Store(true)
@@ -179,7 +189,7 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{SessionSeconds: time.Since(c.started).Seconds(), DataBudget: cap(c.dataSlots), DataInFlight: len(c.dataSlots), ReadInFlight: len(c.readSlots), ActiveUploads: c.activeUploads.Load(), UploadPayloadBytes: c.uploadSize, LoadedRTTLimitMS: c.Profile.LoadedRTTLimitMS, TransportVersion: "0.3.6", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
+	return Stats{LateReplies: c.lateReplies.Load(), AbandonedTimeouts: c.abandonedTimeouts.Load(), ReadBudget: c.readBudget(), PeerReadWindow: c.peerReadWindow.Load(), SessionSeconds: time.Since(c.started).Seconds(), DataBudget: cap(c.dataSlots), DataInFlight: len(c.dataSlots), ReadInFlight: len(c.readSlots), ActiveUploads: c.activeUploads.Load(), UploadPayloadBytes: c.uploadSize, LoadedRTTLimitMS: c.Profile.LoadedRTTLimitMS, TransportVersion: "0.3.7", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
@@ -261,7 +271,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			if index == 0 && primaryRelease != nil {
 				release = primaryRelease
 			} else if index > 0 && primaryRelease != nil {
-				addr, release, err = c.tryAlternative(targets[0], f.Op, f.Stream)
+				addr, release, err = c.tryAlternative(targets[0], f.Op, f.Stream, f.Bulk)
 			} else {
 				release, err = c.acquirePath(raceCtx, addr, f.Op)
 			}
@@ -390,7 +400,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 			if err != nil && raceCtx.Err() == nil {
 				c.recordFailure(err)
 			}
-			c.recordEnd(addr, attempt.elapsed, size, f.Op, err, raceCtx.Err() != nil)
+			c.recordEnd(addr, attempt.elapsed, size, f.Op, err, raceCtx.Err() != nil, attempt.started)
 			if err == nil {
 				c.replies.Add(1)
 			}
@@ -526,13 +536,22 @@ func (c *Client) DialContext(ctx context.Context, network, address string) (net.
 	if network == "udp" {
 		data = []byte("udp:" + address)
 	}
-	opened, e := c.rpc(ctx, frame{Op: opOpen, Stream: id, Seq: queuedWriteACK | extendedUploadWindow | uint32(c.readCapacity())<<8, Data: data}, base)
+	opened, e := c.rpc(ctx, frame{Op: opOpen, Stream: id, Seq: queuedWriteACK | extendedUploadWindow | extendedReadWindow | uint32(c.readCapacity())<<8, Data: data}, base)
 	if e != nil {
 		return nil, e
 	}
 	streamCtx, cancel := context.WithCancel(c.ctx)
 	s := &Conn{client: c, id: id, base: base, ctx: streamCtx, cancel: cancel, queuedACK: len(opened) == 1 && opened[0]&byte(queuedWriteACK) != 0}
 	s.writeLimit = 64
+	s.readLimit = 64
+	if len(opened) == 1 && opened[0]&byte(extendedReadWindow) != 0 {
+		s.readLimit = largeReadWindow
+	}
+	for old := c.peerReadWindow.Load(); uint32(s.readLimit) > old; old = c.peerReadWindow.Load() {
+		if c.peerReadWindow.CompareAndSwap(old, uint32(s.readLimit)) {
+			break
+		}
+	}
 	if s.queuedACK && opened[0]&byte(extendedUploadWindow) != 0 {
 		s.writeLimit = largeUploadWindow
 	}
@@ -565,6 +584,7 @@ type Conn struct {
 
 	queuedACK  bool
 	writeLimit int
+	readLimit  int
 	readWake   chan struct{}
 	traffic    atomic.Uint64
 
@@ -604,7 +624,7 @@ func (s *Conn) window(operation ...byte) int {
 	if len(operation) > 0 {
 		op = operation[0]
 	}
-	ceiling := 64
+	ceiling := max(64, s.readLimit)
 	if op == opWrite {
 		ceiling = max(64, s.writeLimit)
 	}
@@ -645,10 +665,11 @@ func (s *Conn) prefetch() {
 		seq, epoch uint32
 		readResult
 	}
-	results := make(chan completion, 64)
-	pending := make(map[uint32]readResult, 64)
-	active := make(map[uint32]bool, 64)
-	waiting := make(map[uint32]uint32, 64)
+	readLimit := max(64, s.readLimit)
+	results := make(chan completion, readLimit)
+	pending := make(map[uint32]readResult, readLimit)
+	active := make(map[uint32]bool, readLimit)
+	waiting := make(map[uint32]uint32, readLimit)
 	delivered, window := uint32(0), uint32(1)
 	launch := func(seq, epoch uint32) {
 		active[seq] = true
@@ -678,7 +699,7 @@ func (s *Conn) prefetch() {
 		if window > 1 {
 			window = uint32(s.window())
 		}
-		for seq := delivered; seq-delivered < window && seq-s.readSeq.Load() < 64; seq++ {
+		for seq := delivered; seq-delivered < window && seq-s.readSeq.Load() < uint32(readLimit); seq++ {
 			if active[seq] {
 				continue
 			}
@@ -700,7 +721,11 @@ func (s *Conn) prefetch() {
 				delete(waiting, result.seq)
 				pending[result.seq] = result.readResult
 				if result.e == nil && len(result.b) > 0 {
-					s.client.markReader(s.id)
+					// Small interactive replies do not consume a sustained bulk
+					// reader's equal share for the following second.
+					if len(result.b) >= chunkSize/2 {
+						s.client.markReader(s.id)
+					}
 					window = uint32(s.window())
 				}
 			}

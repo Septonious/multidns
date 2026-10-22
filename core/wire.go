@@ -35,6 +35,8 @@ const (
 	opFlush              byte   = 8
 	queuedWriteACK       uint32 = 1
 	extendedUploadWindow uint32 = 2
+	extendedReadWindow   uint32 = 4
+	largeReadWindow             = 128
 	largeUploadWindow           = 256
 )
 

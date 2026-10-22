@@ -388,9 +388,11 @@ public final class MainActivity extends Activity {
       int healthy = 0;
       for (int i = 0; resolvers != null && i < resolvers.length(); i++) {
         JSONObject resolver = resolvers.getJSONObject(i);
-        if (resolver.optString("state").equals("green")
-            || resolver.optString("status").equals("Degraded")
-            || resolver.optString("status").equals("Standby")) healthy++;
+        if (resolver.optBoolean(
+            "reachable",
+            !resolver.optString("state").isEmpty()
+                && !resolver.optString("state").equals("red")
+                && !resolver.optString("status").equals("Checking"))) healthy++;
       }
       if (downValue != null) downValue.setText(String.format(Locale.US, "%.2f", downloadRate));
       if (upValue != null) upValue.setText(String.format(Locale.US, "%.2f", uploadRate));
@@ -737,7 +739,7 @@ public final class MainActivity extends Activity {
         key = field(identity, "Server authentication key", original.optString("key"), false);
     key.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
     LinearLayout paths =
-        section(page, "Resolver groups", "All resolvers carry data. Groups define data backups.");
+        section(page, "Resolver groups", "Active groups share capacity. Spares provide failover.");
     text(paths, "One group per line; separate members with commas.").setTextColor(Ui.MUTED);
     StringBuilder groups = new StringBuilder();
     JSONArray gs = original.optJSONArray("groups");

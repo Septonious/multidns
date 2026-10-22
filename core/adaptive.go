@@ -11,6 +11,10 @@ import (
 )
 
 type ResolverHealth struct {
+	LateReplies         uint64  `json:"late_replies"`
+	AbandonedTimeouts   uint64  `json:"abandoned_timeouts"`
+	RecoveryMS          int64   `json:"recovery_ms"`
+	RetryMS             int64   `json:"retry_ms"`
 	Transport           string  `json:"transport"`
 	UDPTimeouts         uint64  `json:"udp_timeouts"`
 	UDPSocketErrors     uint64  `json:"udp_socket_errors"`
@@ -125,6 +129,8 @@ func (c *Client) healthSnapshot() []ResolverHealth {
 		copy.TXWorkers = settings.TXWorkers
 		copy.RXWorkers = settings.RXWorkers
 		if p := c.paths[h.Endpoint]; p != nil {
+			copy.RecoveryMS = max(0, time.Until(p.recoveryUntil).Milliseconds())
+			copy.RetryMS = max(0, time.Until(p.retryAt).Milliseconds())
 			copy.Transport = "udp"
 			if p.preferTCP {
 				copy.Transport = "tcp"
@@ -205,7 +211,7 @@ func (c *Client) recordStart(addr string) {
 	h.InFlight++
 	h.Queries++
 }
-func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte, err error, canceled bool) {
+func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte, err error, canceled bool, starts ...time.Time) {
 	c.adaptiveMu.Lock()
 	defer c.adaptiveMu.Unlock()
 	h := c.health[addr]
@@ -216,10 +222,24 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 	if canceled {
 		return
 	}
-	h.Checked = time.Now()
-	c.updateCapacityLocked(addr, size, op, err, elapsed)
+	now := time.Now()
+	started := now
+	if len(starts) > 0 {
+		started = starts[0]
+	}
+	path := c.pathLocked(addr)
+	stale := started.Before(path.downAt) || err != nil && started.Before(path.recoveredAt)
+	h.Checked = now
+	if !stale {
+		c.updateCapacityLocked(addr, size, op, err, elapsed)
+		if op == opRead {
+			c.updateReadBudgetLocked(size, elapsed, err != nil, started, now, true)
+		}
+	}
 	if err != nil {
-		h.Failures++
+		if !stale {
+			h.Failures++
+		}
 		h.LastError = failureSummary(err)
 		switch failureKind(err) {
 		case "timeout":
@@ -236,38 +256,29 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		default:
 			h.SocketErrors++
 		}
+		if stale {
+			return
+		}
 		// Reachability is not a per-packet loss flag. Other authenticated ACKs
 		// prove that a resolver is still alive even while one datagram expires.
 		// Three failed exchanges with no recent progress open the circuit;
 		// their ARQ retries are already free to use every other live path.
-		path := c.pathLocked(addr)
 		path.lastIssue = time.Now()
 		if path.failureSince.IsZero() {
 			path.failureSince = time.Now()
 		}
 		// Briefly route new work elsewhere without displaying a disconnect.
 		// This also stops an overloaded recursor accumulating a fresh burst.
-		if op != opRead {
+		if op != opRead && h.Healthy {
 			path.retryAt = time.Now().Add(time.Duration(min(100, max(25, h.RTTMS/2)) * float64(time.Millisecond)))
 		}
 		quiet := max(150*time.Millisecond, time.Duration(3*h.RTTMS*float64(time.Millisecond)))
 		if h.Failures >= 3 && time.Since(path.lastSuccess) >= quiet && time.Since(path.failureSince) >= min(quiet, 150*time.Millisecond) {
-			if h.Healthy {
-				h.HealthDowns++
-			}
-			h.Healthy = false
-			path.retryAt = time.Now().Add(300 * time.Millisecond)
+			c.markPathDownLocked(addr, now)
 		}
 		c.wakeAdmissionsLocked()
 		return
 	}
-	if !h.Healthy {
-		h.Recoveries++
-	}
-	h.Healthy = true
-	c.pathLocked(addr).lastSuccess = time.Now()
-	c.pathLocked(addr).failureSince = time.Time{}
-	c.pathLocked(addr).probeFailures = 0
 	h.Replies++
 	if op == opWrite {
 		h.Uploaded += uint64(size)
@@ -275,7 +286,10 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 	if op == opRead {
 		h.Downloaded += uint64(size)
 	}
-	h.Failures = 0
+	if stale {
+		return
+	}
+	c.recoverPathLocked(addr, now)
 	// Physical lease release wakes the next waiter; do not broadcast twice.
 	// A successful idle long-poll includes server wait time, not network RTT.
 	if op != opRead || size > 0 {
@@ -453,49 +467,32 @@ func (c *Client) testLatency(ctx context.Context, emit func(ResolverHealth), ski
 					continue
 				}
 				c.adaptiveMu.Lock()
-				if h.Healthy {
-					path := c.pathLocked(addr)
-					path.lastSuccess, path.failureSince = time.Now(), time.Time{}
-					path.probeFailures = 0
-				}
+				now := time.Now()
+				path := c.pathLocked(addr)
 				old := c.health[addr]
-				if old != nil {
-					path := c.pathLocked(addr)
-					if skipActive && !h.Healthy {
-						path.probeFailures++
-						// One post-load pair of lost canaries is not an outage.
-						if path.probeFailures < 2 {
-							h.Healthy = old.Healthy
-						}
-					} else if h.Healthy {
-						path.probeFailures = 0
-					}
-					// A tiny health probe must not erase accumulated loss diagnostics
-					// or replace the loaded-path RTT estimator.
-					if !old.Healthy && h.Healthy {
-						old.Failures = 0
-						old.Recoveries++
-					}
-					// Do not let two tiny lost probes erase concurrent payload
-					// progress (or a reply newer than this probe run).
-					if !h.Healthy && time.Since(c.pathLocked(addr).lastSuccess) < time.Second {
-						h.Healthy = old.Healthy
-					}
-					if old.Healthy && !h.Healthy {
-						old.HealthDowns++
-					}
-					old.Healthy = h.Healthy
+				if old == nil {
+					c.health[addr] = &h
 					if h.Healthy {
-						old.Failures = 0
+						c.recoverPathLocked(addr, now)
 					}
-					if old.RTTMS == 0 {
-						old.RTTMS = h.RTTMS
-						old.RTTVarianceMS = h.RTTMS / 2
+				} else {
+					wasHealthy := old.Healthy
+					if h.Healthy && !h.Checked.Before(path.downAt) {
+						c.recoverPathLocked(addr, now)
+						if !wasHealthy || old.RTTMS == 0 {
+							old.RTTMS, old.RTTVarianceMS = h.RTTMS, h.RTTMS/2
+						}
+					} else if !h.Healthy {
+						path.probeFailures++
+						// Reject a probe result predating authenticated progress,
+						// even if a slow probe run took more than one second.
+						if (!skipActive || path.probeFailures >= 2) && !path.lastSuccess.After(h.Checked) && now.Sub(path.lastSuccess) >= time.Second {
+							c.markPathDownLocked(addr, now)
+						}
 					}
 					old.Checked = h.Checked
 					h = *old
 				}
-				c.health[addr] = &h
 				c.wakeAdmissionsLocked()
 				c.adaptiveMu.Unlock()
 				if emit != nil {
@@ -509,9 +506,10 @@ loop:
 		if skipActive {
 			c.adaptiveMu.Lock()
 			h, p := c.health[addr], c.paths[addr]
+			cooling := h != nil && !h.Healthy && p != nil && time.Now().Before(p.retryAt)
 			recent := h != nil && h.Healthy && p != nil && time.Since(p.lastSuccess) < 3*time.Second && !(p.preferTCP && !time.Now().Before(p.udpProbeAt))
 			c.adaptiveMu.Unlock()
-			if recent {
+			if recent || cooling {
 				continue
 			}
 		}

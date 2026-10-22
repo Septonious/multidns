@@ -117,6 +117,9 @@ func (c *Client) dataCapacity(op byte) int {
 			capacity += limit
 		}
 	}
+	if op == opRead {
+		capacity = min(capacity, c.readBudget())
+	}
 	return min(cap(c.dataSlots), capacity)
 }
 
@@ -133,6 +136,9 @@ func (c *Client) hedgeDelay(addr string, op byte, bulk bool) time.Duration {
 		delay += 80 * time.Millisecond
 	} else if !bulk {
 		delay = max(20*time.Millisecond, delay/2)
+	}
+	if !bulk {
+		delay = min(delay, time.Duration(c.Profile.LoadedRTTLimitMS/2)*time.Millisecond)
 	}
 	return min(time.Second, max(20*time.Millisecond, delay))
 }

@@ -11,6 +11,7 @@ func (c *Client) SetDiagnostics(enabled bool) { c.diagnostics.Store(enabled) }
 func (c *Client) DiagnosticsEnabled() bool    { return c.diagnostics.Load() }
 
 type resolverSummary struct {
+	Reachable bool    `json:"reachable"`
 	Transport string  `json:"transport"`
 	Endpoint  string  `json:"endpoint"`
 	RTT       float64 `json:"rtt_ms"`
@@ -35,6 +36,7 @@ func (c *Client) SummaryJSON() string {
 		p := c.paths[addr]
 		if h != nil {
 			row.RTT = h.RTTMS
+			row.Reachable = h.Healthy && (h.RTTMS > 0 || h.Replies > 0)
 			if h.Healthy && h.RTTMS <= 0 && h.Replies == 0 {
 				row.Status = "Checking"
 			} else if !h.Healthy {
@@ -82,6 +84,6 @@ func (c *Client) SummaryJSON() string {
 		GroupCount int               `json:"group_count"`
 		Resolvers  []resolverSummary `json:"resolvers"`
 		Debug      bool              `json:"debug_enabled"`
-	}{"0.3.6", c.uploaded.Load(), c.downloaded.Load(), c.streams.Load(), groups, rows, c.DiagnosticsEnabled()})
+	}{"0.3.7", c.uploaded.Load(), c.downloaded.Load(), c.streams.Load(), groups, rows, c.DiagnosticsEnabled()})
 	return string(b)
 }

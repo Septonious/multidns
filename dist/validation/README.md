@@ -1,26 +1,27 @@
-# 0.3.6 validation
+# 0.3.7 validation
 
-`race-final.txt` is the complete serialized race suite of final Go source
-(core 42.370 s, mobile 1.079 s), followed by `vet-final.txt`. Current Android
-build/lint, native UI rendering, signing identity, 16 KiB alignment, artifact
-checksums and old/new CLI compatibility evidence live here. Native VPN lifecycle
-and the physical Oppo are not exercised on this host.
+Full final-product race suite passed (core 51.221 s, mobile 1.080 s), followed
+by vet. Additional RX relearning, cancellation/TCP repeats, late-reply and
+backpressure repeats passed. Android build, lint (0 errors/18 warnings), two
+Robolectric UI tests, instrumentation compilation, original signing identity,
+16 KiB ZIP/ELF alignment, both HEV/JNI ABIs and all seven checksums passed.
+Old/new, new/old and new/new CLI pairs transferred byte-verified 256 KiB HTTP
+uploads/downloads. The physical Oppo and native VPN lifecycle were not tested.
 
-`admission-before.txt` / `admission-final.txt` measure the same release/fair-queue
-operation with 20 paths and 256 waiters. Median 20.28 us -> 5.393 us. This is a
-scheduler operation, not total CPU or a fourfold bandwidth claim.
+capacity-before/final use identical 36-path SHA-verified sustained traffic:
+0.3.6 11.80/2.902 Mbps down/up, p95 109.7/max 1127 ms, zero health-downs;
+0.3.7 13.13/2.522 Mbps, p95 159.9/max 775.7 ms, four health-downs.
+Upload and status transitions regressed in this sample. Do not claim a
+consistent speed or stability improvement from these measurements.
 
-`transitions-before.txt`, `transitions-control-repeat.txt`, and
-`transitions-final.txt` compare identical SHA-verified SOCKS download/upload/quiet
-traffic with application echoes, idle streams, 20 paths, singles/pairs and
-sparse downstream loss/queueing. Final four cases: upload 2.91–3.59 Mbps,
-maximum echo 121.5–159.7 ms, no health-downs. The repeated unchanged baseline
-also has an 8.35 s echo / 28 health-down outlier. Cause is not established;
-a later good run cannot erase it or prove an RTT guarantee.
+sustained-before/final add deterministic sparse read loss and queueing:
+original group-two baseline 8.094/1.656 Mbps, p95 212.1/max 723.8 ms, five downs;
+final policy 6.766/2.145 Mbps, p95 228.9/max 1489 ms, zero downs.
+The 500 ms target is not a proven hard bound. Global/path feedback and recovery
+now cover previously ignored physical outcomes, but remaining tails require
+production measurements. See docs/PERFORMANCE.md for fixture scope and limits.
 
-`intermediate/` retains rejected directional-ranking/deficit candidates and
-release-only intermediates, including regressions. They are not the shipped
-transport. The final release preserves placement and concurrency bounds and
-reduces admission work instead. See docs/PERFORMANCE.md for context and the
-user's separate phone measurements. Earlier release evidence is archived by
-version, including the previous `0.3.5/intermediate/` record.
+intermediate/ preserves failed full-suite/TCP runs and earlier candidates.
+The TCP timing fixture changed 150 to 400 ms with its original zero-timeout
+and bounded-connection assertions retained. A later pass does not erase old
+failures. Previous release evidence, including its intermediates, is in 0.3.6/.

@@ -1,1 +1,1 @@
-PASS go vet ./... (exit 0; no diagnostics)
+

@@ -11,6 +11,8 @@ import (
 // prevent ten busy streams from flooding the same recursive resolver.
 // Admission happens before global slots and before starting an exchange timer.
 type pathState struct {
+	downAt, recoveredAt, recoveryUntil      time.Time
+	outages                                 int
 	rx                                      readControl
 	preferTCP                               bool
 	tcpCursor                               uint32
@@ -112,7 +114,7 @@ func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error,
 		// WAIT is not a congestion sample, but it can cautiously restore the
 		// startup floor when real queued work is starved after an old loss cut.
 		startup := min(c.pathCeiling(addr), max(2, min(8, c.Profile.Window)))
-		if (p.waiting > 0 || len(c.admissions) > 0) && p.limit < startup && now.Sub(p.lastCut) > time.Second && now.Sub(p.lastIdleGrowth) > 500*time.Millisecond {
+		if !now.Before(p.recoveryUntil) && (p.waiting > 0 || len(c.admissions) > 0) && p.limit < startup && now.Sub(p.lastCut) > time.Second && now.Sub(p.lastIdleGrowth) > 500*time.Millisecond {
 			p.limit++
 			p.recoveries++
 			p.lastIdleGrowth = now
@@ -227,7 +229,7 @@ func (c *Client) updateCapacityLocked(addr string, size int, op byte, err error,
 
 	// Replies from requests sent before a cut cannot immediately regrow the
 	// reduced budget. Require new evidence after the old burst has drained.
-	if now.Sub(p.lastCut) < 200*time.Millisecond || now.Add(-elapsed).Before(p.lastCut) {
+	if now.Before(p.recoveryUntil) || now.Sub(p.lastCut) < 200*time.Millisecond || now.Add(-elapsed).Before(p.lastCut) {
 		return
 	}
 	p.successes++

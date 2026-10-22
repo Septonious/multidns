@@ -135,14 +135,21 @@ public class AppUiTest {
       live.put(
           new JSONObject()
               .put("endpoint", "192.0.2." + (i + 1) + ":53")
-              .put("state", i == 6 ? "yellow" : i == 7 ? "red" : "green")
-              .put("status", i == 6 ? "Recent loss" : i == 7 ? "Unavailable" : "Active")
+              .put("state", i >= 4 && i <= 6 ? "yellow" : i == 7 ? "red" : "green")
+              .put("reachable", i != 7)
+              .put(
+                  "status",
+                  i == 4
+                      ? "High latency"
+                      : i == 5
+                          ? "Download limited"
+                          : i == 6 ? "Recent loss" : i == 7 ? "Unavailable" : "Active")
               .put("streams", i == 6 ? 12 : i == 7 ? 0 : 3)
               .put("transport", i == 0 ? "tcp" : "udp")
               .put("rtt_ms", 43 + i * 4));
     TunnelService.stats =
         new JSONObject()
-            .put("transport_version", "0.3.6")
+            .put("transport_version", "0.3.7")
             .put("uploaded", 2200000)
             .put("downloaded", 6960000)
             .put("streams", 8)
@@ -155,6 +162,11 @@ public class AppUiTest {
     set(activity, "statsUploaded", 2120000L);
     set(activity, "statsDownloaded", 6520000L);
     pageSummary(activity);
+    assertTrue(
+        ((TextView) get(activity, "healthValue"))
+            .getText()
+            .toString()
+            .startsWith("7/8 resolvers reachable"));
     render(activity, "connected", 360, 800);
     page(activity, "diagnostics");
     render(activity, "resolvers-live", 360, 800);

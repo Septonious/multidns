@@ -152,7 +152,7 @@ func TestYellowCardExplainsDirectionalIssueWithoutImposingStreamCap(t *testing.T
 		}
 		for _, row := range data.Resolvers {
 			if row.Endpoint == addr {
-				if row.Status != want || row.State != "yellow" || row.Streams != 12 {
+				if row.Status != want || row.State != "yellow" || row.Streams != 12 || !row.Reachable {
 					t.Fatalf("unexpected resolver card: %+v, want %s", row, want)
 				}
 				return

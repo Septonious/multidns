@@ -1,1 +1,1 @@
-Android lint: 0 errors, 18 warnings.
+0 errors, 18 warnings

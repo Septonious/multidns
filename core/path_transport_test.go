@@ -46,7 +46,10 @@ func TestTCPOnlyResolverStartupTransferAndUDPRecovery(t *testing.T) {
 	p.Groups = []Group{{Resolvers: []string{addr}}}
 	p.GroupCount = 1
 	p.GroupSize = 1
-	p.TimeoutMS = 150
+	// The fixture intentionally adds 15ms service plus up to 80ms server
+	// long-poll wait. Leave race-detector scheduling margin while retaining
+	// the zero-timeout and bounded-connection assertions below.
+	p.TimeoutMS = 400
 	c, err := NewClient(p, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -1,3 +1,77 @@
+# Version 0.3.7 — 22 October 2026
+
+Parent: 6928eb9 / 0.3.6. User: many resolvers fail to scale beyond 10–15 Mbps,
+often 6–7, repeated post-speedtest resolver fall/recovery until reconnect, and
+high latency wrongly reducing the main-page reachable count. Green theme retained.
+
+Implemented:
+- Explicit reachable flag; dashboard counts authenticated responding yellow
+  high-latency/recent-loss/download-limited paths. Checking/down stay excluded.
+  Editor describes shared active capacity/spares, no false group-backup claim.
+- Complete physical data feedback: abandoned timeout congestion accounting and
+  authenticated late replies matched to request/session/stream/sequence/op/nonce.
+  Late success updates progress/delay but not delivered bytes or RX growth.
+  Normal timeout and caller cleanup cannot double-count an abandoned timeout.
+- Circuit backoff 500 ms → 8 s; failure/recovery epochs reject stale completions;
+  recovery clears obsolete loss/pacing/clock and starts at most four requests
+  with two seconds before growth. Newer progress defeats old failed probes.
+- TCP frame physical deadline independent of short-lived caller, prompt cancel
+  retains serial/path credits until completion; no spurious shared socket close.
+  Canceled atomic UDP writes likewise do not close other pending transactions.
+- Additive v1 opOpen capability bit 4 negotiates 128 read chunks; legacy 64.
+  Server 512 total / 384 RX workers, bounded batch TCP reads, immutable chunks,
+  monotone ACK watermark, separate producer credit, per-sequence data waiters
+  with refcounts. Only needed sequence waiters wake; close/EOF/error releases all.
+- Adaptive RX budget 160 → 320 on healthy demand. Global cuts need sustained
+  excess delay or a full 256-outcome sample with >=8% loss, avoiding repeated
+  global cuts on ordinary per-path ARQ loss. Total physical budget stays 512.
+  Small replies do not keep bulk reader shares. Interactive hedges can use
+  global foreground reserve ahead of bulk, while queued foreground work wins;
+  timer limited to half configured loaded RTT target. Existing groups remain
+  shared active preferences/sets, not independent transport lanes.
+- Stats add read_budget, peer_read_window, late_replies, abandoned_timeouts and
+  per-path recovery_ms/retry_ms. Debug capture off/slim snapshots unchanged.
+- Android version 0.3.7 / code 14. No key/profile/header-size/HMAC/XOR change.
+  Update both APK and server for larger read windows; old peers still interoperate.
+
+Validation:
+- Exact final product source full race PASS (core 51.221 s, mobile 1.080 s), vet.
+  Earlier complete passes 39.240/45.131/48.648/44.323 s retained. New tests cover
+  stale outcomes, bounded recovery, progress-vs-probe ordering, physical timeout,
+  authentic/invalid/old late replies, blocked TCP write cancellation/reuse,
+  window negotiation, immutable chunks/ACKs, sequence notifications/refcounts,
+  head reserve and sparse/global loss distinction. Added RX relearning check.
+- Strict TCP fixture 150 ms intermittently failed zero-timeout/connection count;
+  raw failures kept. Fixture now 400 ms for 15 ms frontend + deliberate 80 ms
+  server wait + race margin; original assertions unchanged, three repeats passed.
+- Intermediates include mixed HTTPS/backpressure full-suite failures, then two
+  isolated repeats passed. No proven common cause claimed; retain these records.
+- Final-policy 36-path stress: 6.766/2.145 Mbps down/up; p95 echo 228.9 ms,
+  max 1489 ms, 0 health-downs, 337 normal / 466 abandoned timeouts. Baseline
+  8.094/1.656, p95 212.1/max 723.8, 5 downs. Speed/tails are mixed; do not claim
+  universal speed gain or strict <=500 ms. Clean-pool late-completion candidate
+  immediately before final loss-threshold change: 14.43/3.873 vs baseline
+  11.80/2.902 Mbps, p95 106.9/max 669.4, 0 downs vs baseline 1127 ms max.
+  Phone/Oppo/native VPN lifecycle not executed on host; remeasure production.
+
+- Exact final healthy-capacity run: 13.13/2.522 Mbps, p95 159.9/max 775.7 ms,
+  four health-downs, 155 normal/97 abandoned timeouts. Upload and status drops
+  regressed against the clean baseline in this sample. Do not use earlier
+  14.43/3.873 candidate as final-build evidence or claim consistent improvement.
+- Android build, lint (0 errors/18 warnings), two Robolectric screen tests and
+  instrumentation compilation passed. Green current UI screenshots in dist/validation/ui.
+  Original signing certificate retained; APK ZIP/ELF 16 KiB alignment and both
+  ABI HEV/JNI checks passed. Seven distributable checksums verified.
+- CLI new/old, old/new and new/new pairs each passed authenticated startup plus
+  byte-verified 256 KiB HTTP upload and download. Final RX relearning test passed.
+
+Raw work/env: /workspace/work/multidns-0.3.7-validation; unchanged control source:
+/workspace/work/multidns-0.3.6-control. Existing production service public listen
+136.148.220.253:53, t.atmosl.ink -> ns2.atmosl.ink. Preserve env/listen override.
+Server update should use explicit git pull --ff-only origin main (detached-safe).
+
+---
+
 # Version 0.3.6 — 21 October 2026
 
 Previous checkpoint: 1ee0ff4 / 0.3.5. Latest user phone runs: single groups

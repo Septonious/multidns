@@ -1,3 +1,33 @@
+# Version 0.3.7 transport additions
+
+An additive `opOpen.Seq` capability bit 4 negotiates a 128-chunk downstream
+cache/prefetch window. Older peers retain 64. Header sizes, authentication, XOR,
+chunk payload limit and key/profile format are unchanged. The new server admits
+at most 512 handlers / 384 read handlers; the adaptive client retains 512 total
+physical credits and grows its RX budget from 160 toward 320 under healthy
+sustained demand. Legacy servers keep the old RX ceiling. Uploaded bytes still
+fit in a DNS QNAME; no promise of linear scaling with resolver count is implied.
+
+The server reads TCP data in bounded batches, copies immutable DNS chunks,
+tracks a monotone ACK deletion watermark, and signals per-sequence read waiters.
+ACKs release separate producer credit, leaving unrelated missing-data readers
+asleep. Close/EOF/error wakes outstanding waiters. Registration refcounts remove
+expired waiters, and buffering remains bounded by the negotiated cache window.
+
+Circuit recovery reduces a failed path's window and clears stale pacing/loss
+history, with a two-second growth grace and exponential retry. Stale completion
+and probe episodes cannot overwrite newer recovery/progress. Physical abandoned
+request losses still feed direction-specific/global congestion control without
+asserting an outage. TCP frame completion has its own bounded deadline; a caller
+can cancel without truncating a shared stream. Interactive hedges can use
+reserved credits ahead of queued bulk, while queued foreground work has priority.
+
+The main-page reachable count is separate from quality colors. Group layout
+continues to express active sets/preferences and standby capacity; adaptive
+admission remains shared across active groups.
+
+---
+
 # Prototype contract
 
 One integrated prototype: authenticated, unencrypted DNS transport; independent
