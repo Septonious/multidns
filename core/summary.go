@@ -84,6 +84,6 @@ func (c *Client) SummaryJSON() string {
 		GroupCount int               `json:"group_count"`
 		Resolvers  []resolverSummary `json:"resolvers"`
 		Debug      bool              `json:"debug_enabled"`
-	}{"0.3.7", c.uploaded.Load(), c.downloaded.Load(), c.streams.Load(), groups, rows, c.DiagnosticsEnabled()})
+	}{"0.3.8", c.uploaded.Load(), c.downloaded.Load(), c.streams.Load(), groups, rows, c.DiagnosticsEnabled()})
 	return string(b)
 }

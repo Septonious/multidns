@@ -272,7 +272,10 @@ func (c *Client) recordEnd(addr string, elapsed time.Duration, size int, op byte
 		if op != opRead && h.Healthy {
 			path.retryAt = time.Now().Add(time.Duration(min(100, max(25, h.RTTMS/2)) * float64(time.Millisecond)))
 		}
-		quiet := max(150*time.Millisecond, time.Duration(3*h.RTTMS*float64(time.Millisecond)))
+		// Data RTOs are deliberately short for ARQ. Their simultaneous expiry
+		// is not a separate reachability probe: give delayed authenticated
+		// progress a full second before displaying a resolver as unavailable.
+		quiet := max(time.Second, time.Duration(3*h.RTTMS*float64(time.Millisecond)))
 		if h.Failures >= 3 && time.Since(path.lastSuccess) >= quiet && time.Since(path.failureSince) >= min(quiet, 150*time.Millisecond) {
 			c.markPathDownLocked(addr, now)
 		}

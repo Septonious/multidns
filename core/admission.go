@@ -26,6 +26,18 @@ func (c *Client) wakeAdmissionsLocked() {
 		case next.wake <- struct{}{}:
 		default:
 		}
+	} else if len(c.admissions) > 0 && c.admissionTimer == nil && c.ctx.Err() == nil {
+		// Cooldowns can expire with no packet completion to wake the queue. One
+		// pool timer is enough; one timer per chunk creates a polling storm under
+		// load and makes every blocked goroutine compete for the controller lock.
+		c.admissionTimer = time.AfterFunc(20*time.Millisecond, func() {
+			c.adaptiveMu.Lock()
+			defer c.adaptiveMu.Unlock()
+			c.admissionTimer = nil
+			if c.ctx.Err() == nil {
+				c.wakeAdmissionsLocked()
+			}
+		})
 	}
 }
 func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
@@ -39,7 +51,7 @@ func (c *Client) pathAvailableLocked(addr string, op byte, bulk bool) bool {
 	if bulk && cap(c.dataSlots) > 32 && c.leasedData >= cap(c.dataSlots)-8 {
 		return false
 	}
-	if op == opRead && c.readBudget() > 0 && c.leasedReads >= c.readBudget() {
+	if op == opRead && c.readAdmissionBudget() > 0 && c.leasedReads >= c.readAdmissionBudget() {
 		return false
 	}
 	p := c.pathLocked(addr)
@@ -273,15 +285,11 @@ func (c *Client) acquireAnyPath(ctx context.Context, preferred []string, op byte
 		}
 		wake := a.wake
 		c.adaptiveMu.Unlock()
-		// A short wake also bounds priority aging when no exchange completes.
-		timer := time.NewTimer(20 * time.Millisecond)
 		select {
 		case <-wake:
 		case <-ctx.Done():
 		case <-c.ctx.Done():
-		case <-timer.C:
 		}
-		timer.Stop()
 		c.adaptiveMu.Lock()
 	}
 }

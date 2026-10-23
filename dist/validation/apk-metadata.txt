@@ -1,4 +1,4 @@
-package: name='org.multidns.app' versionCode='14' versionName='0.3.7' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
+package: name='org.multidns.app' versionCode='15' versionName='0.3.8' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'
 sdkVersion:'24'
 targetSdkVersion:'35'
 uses-permission: name='android.permission.INTERNET'

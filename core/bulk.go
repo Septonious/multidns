@@ -118,7 +118,7 @@ func (c *Client) dataCapacity(op byte) int {
 		}
 	}
 	if op == opRead {
-		capacity = min(capacity, c.readBudget())
+		capacity = min(capacity, c.readAdmissionBudget())
 	}
 	return min(cap(c.dataSlots), capacity)
 }

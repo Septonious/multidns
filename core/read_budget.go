@@ -15,6 +15,18 @@ func (c *Client) readBudget() int {
 	return cap(c.readSlots)
 }
 
+// Large TXT replies need far fewer requests per byte than QNAME uploads. Keep
+// three quarters of the shared wire credits available to active uploads, while
+// preserving a receive floor for responses and allowing full RX-only capacity.
+// Existing reads drain naturally; never revoke a physical request's credit.
+func (c *Client) readAdmissionBudget() int {
+	budget := c.readBudget()
+	if c.Profile.Adaptive && c.activeUploads.Load() > 0 {
+		budget = min(budget, max(8, cap(c.dataSlots)/4))
+	}
+	return budget
+}
+
 // Expand only a saturated, successfully delivering pool, using the negotiated
 // server window. Loss/delay withdraw credits; existing requests drain naturally.
 // Physical data credits and individual resolver controllers remain authoritative.

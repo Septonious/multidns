@@ -1,0 +1,13 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Septonious/multidns/core
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkDuplexPool/paths-20/group-2-2         	       1	34585641626 ns/op	        47.00 abandoned-timeouts	       909.5 app-max-ms	       222.0 app-p95-ms	       261.0 app-samples	         7.762 download-Mbps	         0 health-downs	       128.0 peer-read-window	       320.0 read-budget	       285.0 retries	       310.0 timeouts	         1.291 upload-Mbps	   4202383 uploaded-bytes
+BenchmarkDuplexPool/paths-20/group-2-2         	--- FAIL: BenchmarkDuplexPool/paths-20/group-2
+    transitions_bench_test.go:215: context deadline exceeded (Client.Timeout or context cancellation while reading body)
+    transitions_bench_test.go:215: Post "http://127.0.0.1:37893": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+--- FAIL: BenchmarkDuplexPool/paths-20/group-2-2
+    transitions_bench_test.go:215: context deadline exceeded (Client.Timeout or context cancellation while reading body)
+    transitions_bench_test.go:215: Post "http://127.0.0.1:37893": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+PASS
+ok  	github.com/Septonious/multidns/core	119.358s

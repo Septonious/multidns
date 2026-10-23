@@ -1,3 +1,29 @@
+# 0.3.8 upload demand and ordered repair
+
+The learned receive ceiling is separate from the current admission limit. Active
+uploads retain three quarters of the shared wire budget for write/foreground
+requests. Reads already on the wire drain with their original physical leases;
+no counters are artificially returned. Once upload demand stops, receive-only
+transfers can use the full learned ceiling again. The total 512-credit budget,
+resolver ceilings and foreground reserve are unchanged.
+
+One pool-level 20 ms timer handles a fully blocked queue's cooldown expiry.
+Eligible waiters are signaled by admission/release/control events. There is no
+per-chunk periodic polling timer. Cancellation removes its waiter and selects
+another; a timer callback never schedules more work after client cancellation.
+
+Upload writers expose the current unacknowledged prefix through a local atomic
+sequence hint. A delayed backup for that prefix alone may use existing foreground
+reserve ahead of queued bulk. Other backups preserve the unique-work-first rule;
+queued foreground requests retain priority. The hint adds no wire bytes and
+changes neither server ACK semantics nor negotiated reorder windows.
+
+Short data retry deadlines are not reachability deadlines. Data failures still
+back off/reroute immediately, while unavailable status requires at least one
+second without authenticated progress (or three measured RTTs if longer).
+
+---
+
 # Version 0.3.7 transport additions
 
 An additive `opOpen.Seq` capability bit 4 negotiates a 128-chunk downstream

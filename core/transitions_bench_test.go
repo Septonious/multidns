@@ -36,6 +36,12 @@ func BenchmarkLargePoolSustained(b *testing.B) {
 func BenchmarkLargePoolCapacity(b *testing.B) {
 	b.Run("paths-36/group-2", func(b *testing.B) { benchmarkPoolTransitions(b, 36, 2, 2048, 512, 4, 2, 0, 0) })
 }
+
+// Both directions share the same physical pool. Measure the SOCKS path rather
+// than direct Conn.Write so source buffering and ACK/refill behavior are included.
+func BenchmarkDuplexPool(b *testing.B) {
+	b.Run("paths-20/group-2", func(b *testing.B) { benchmarkPoolTransitions(b, 20, 2, 8192, 1024, 4, 1, 0, 0, 1) })
+}
 func benchmarkPoolTransitions(b *testing.B, count, size int, options ...int) {
 	downKB, upKB, parallel, cycles := 512, 256, 3, 1
 	lossEvery, queued := int64(67), true
@@ -181,7 +187,11 @@ func benchmarkPoolTransitions(b *testing.B, count, size int, options ...int) {
 		})
 	}
 	defer finish()
-	phase := func(up bool) time.Duration {
+	type phaseResult struct {
+		duration time.Duration
+		err      error
+	}
+	phase := func(up bool) phaseResult {
 		at := time.Now()
 		errs := make(chan error, parallel)
 		for range parallel {
@@ -204,18 +214,38 @@ func benchmarkPoolTransitions(b *testing.B, count, size int, options ...int) {
 				errs <- e
 			}()
 		}
+		var firstErr error
 		for range parallel {
-			if e := <-errs; e != nil {
-				b.Fatal(e)
+			if e := <-errs; e != nil && firstErr == nil {
+				firstErr = e
 			}
 		}
-		return time.Since(at)
+		return phaseResult{time.Since(at), firstErr}
 	}
 	var down, up time.Duration
 	b.ResetTimer()
 	for range b.N * cycles {
-		down += phase(false)
-		up += phase(true)
+		var downResult, upResult phaseResult
+		if len(options) > 6 && options[6] != 0 {
+			done := make(chan phaseResult, 1)
+			go func() { done <- phase(false) }()
+			upResult = phase(true)
+			downResult = <-done
+		} else {
+			downResult = phase(false)
+			if downResult.err != nil {
+				b.Fatal(downResult.err)
+			}
+			upResult = phase(true)
+		}
+		if downResult.err != nil {
+			b.Fatal(downResult.err)
+		}
+		if upResult.err != nil {
+			b.Fatal(upResult.err)
+		}
+		down += downResult.duration
+		up += upResult.duration
 	}
 	b.StopTimer()
 	time.Sleep(600 * time.Millisecond)
@@ -231,6 +261,7 @@ func benchmarkPoolTransitions(b *testing.B, count, size int, options ...int) {
 	}
 	mu.Unlock()
 	b.ReportMetric(float64(c.readBudget()), "read-budget")
+	b.ReportMetric(float64(c.Stats().Uploaded), "uploaded-bytes")
 	b.ReportMetric(float64(c.peerReadWindow.Load()), "peer-read-window")
 	b.ReportMetric(float64(c.Stats().AbandonedTimeouts), "abandoned-timeouts")
 	b.ReportMetric(float64(c.Stats().Retries), "retries")

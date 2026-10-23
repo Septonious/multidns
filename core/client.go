@@ -19,15 +19,16 @@ import (
 
 type Protector interface{ Protect(fd int) bool }
 type Stats struct {
-	LateReplies       uint64  `json:"late_replies"`
-	AbandonedTimeouts uint64  `json:"abandoned_timeouts"`
-	ReadBudget        int     `json:"read_budget"`
-	PeerReadWindow    uint32  `json:"peer_read_window"`
-	SessionSeconds    float64 `json:"session_seconds"`
-	DataBudget        int     `json:"data_budget"`
-	DataInFlight      int     `json:"data_in_flight"`
-	ReadInFlight      int     `json:"read_in_flight"`
-	ActiveUploads     int64   `json:"active_uploads"`
+	LateReplies         uint64  `json:"late_replies"`
+	AbandonedTimeouts   uint64  `json:"abandoned_timeouts"`
+	ReadAdmissionBudget int     `json:"read_admission_budget"`
+	ReadBudget          int     `json:"read_budget"`
+	PeerReadWindow      uint32  `json:"peer_read_window"`
+	SessionSeconds      float64 `json:"session_seconds"`
+	DataBudget          int     `json:"data_budget"`
+	DataInFlight        int     `json:"data_in_flight"`
+	ReadInFlight        int     `json:"read_in_flight"`
+	ActiveUploads       int64   `json:"active_uploads"`
 
 	UploadPayloadBytes int    `json:"upload_payload_bytes"`
 	LoadedRTTLimitMS   int    `json:"loaded_rtt_limit_ms"`
@@ -66,6 +67,7 @@ type Client struct {
 	activeReaders             map[uint32]time.Time
 	activeUploads             atomic.Int64
 
+	admissionTimer       *time.Timer
 	admissionChoice      *admission
 	admissionChoiceAt    time.Time
 	admissionChoiceValid bool
@@ -189,7 +191,7 @@ func (c *Client) Close() {
 	c.proxies.Range(func(key, value any) bool { key.(net.Conn).Close(); return true })
 }
 func (c *Client) Stats() Stats {
-	return Stats{LateReplies: c.lateReplies.Load(), AbandonedTimeouts: c.abandonedTimeouts.Load(), ReadBudget: c.readBudget(), PeerReadWindow: c.peerReadWindow.Load(), SessionSeconds: time.Since(c.started).Seconds(), DataBudget: cap(c.dataSlots), DataInFlight: len(c.dataSlots), ReadInFlight: len(c.readSlots), ActiveUploads: c.activeUploads.Load(), UploadPayloadBytes: c.uploadSize, LoadedRTTLimitMS: c.Profile.LoadedRTTLimitMS, TransportVersion: "0.3.7", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
+	return Stats{LateReplies: c.lateReplies.Load(), AbandonedTimeouts: c.abandonedTimeouts.Load(), ReadBudget: c.readBudget(), ReadAdmissionBudget: c.readAdmissionBudget(), PeerReadWindow: c.peerReadWindow.Load(), SessionSeconds: time.Since(c.started).Seconds(), DataBudget: cap(c.dataSlots), DataInFlight: len(c.dataSlots), ReadInFlight: len(c.readSlots), ActiveUploads: c.activeUploads.Load(), UploadPayloadBytes: c.uploadSize, LoadedRTTLimitMS: c.Profile.LoadedRTTLimitMS, TransportVersion: "0.3.8", PeerUploadWindow: c.peerUploadWindow.Load(), Hedges: c.hedges.Load(), DataHedges: c.dataHedges.Load(), ControlHedges: c.controlHedges.Load(), Exchanges: c.exchanges.Load(), Timeouts: c.timeouts.Load(), DNSErrors: c.dnsErrors.Load(), InvalidReplies: c.invalidReplies.Load(), SocketErrors: c.socketErrors.Load(), NetworkChanges: c.networkChanges.Load(), Queries: c.queries.Load(), Replies: c.replies.Load(), Retries: c.retries.Load(), Waits: c.waits.Load(), Uploaded: c.uploaded.Load(), Downloaded: c.downloaded.Load(), Streams: c.streams.Load()}
 }
 func (c *Client) StatsJSON() string {
 	c.adaptiveMu.Lock()
@@ -266,12 +268,18 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				}
 				timer.Stop()
 			}
+			bulk := f.Bulk
+			if index > 0 && f.Op == opWrite && f.uploadHead != nil && f.uploadHead() {
+				// Only the missing prefix may use foreground reserve. Later
+				// accepted chunks cannot drain the reorder queue without it.
+				bulk = false
+			}
 			var release func()
 			var err error
 			if index == 0 && primaryRelease != nil {
 				release = primaryRelease
 			} else if index > 0 && primaryRelease != nil {
-				addr, release, err = c.tryAlternative(targets[0], f.Op, f.Stream, f.Bulk)
+				addr, release, err = c.tryAlternative(targets[0], f.Op, f.Stream, bulk)
 			} else {
 				release, err = c.acquirePath(raceCtx, addr, f.Op)
 			}
@@ -329,7 +337,7 @@ func (c *Client) race(ctx context.Context, f frame, group int) (frame, error) {
 				results <- result{e: raceCtx.Err()}
 				return
 			}
-			if (f.Op == opWrite || f.Op == opRead) && f.Bulk {
+			if (f.Op == opWrite || f.Op == opRead) && bulk {
 				if err := c.paceData(raceCtx, addr, f.Op); err != nil {
 					results <- result{e: err}
 					return
@@ -613,8 +621,8 @@ func (s *Conn) group(seq uint32, op byte) int {
 	return s.client.chooseGroup(base, s.traffic.Load() >= 4096, op)
 }
 
-// window scales sustained transfers across independent groups, within the
-// server's 64-chunk reorder/credit limit and the client's shared request budget.
+// window shares sustained capacity between active flows, within each stream's
+// negotiated reorder limit and the client's shared physical request budget.
 func (s *Conn) window(operation ...byte) int {
 	base := s.client.Profile.Window
 	if !s.client.Profile.Adaptive {
@@ -811,6 +819,8 @@ func (s *Conn) Write(b []byte) (int, error) {
 	window := s.window(opWrite)
 	results := make(chan completion, largeUploadWindow)
 	pending := make(map[int]completion, window)
+	var uploadHead atomic.Uint32
+	uploadHead.Store(s.writeSeq)
 	next, acknowledged, completed, offset, total := 0, 0, 0, 0, 0
 	for offset < len(b) || acknowledged < next {
 		window = s.window(opWrite)
@@ -824,7 +834,7 @@ func (s *Conn) Write(b []byte) (int, error) {
 			offset += size
 			next++
 			go func() {
-				_, err := s.client.rpcACK(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Data: data, Bulk: len(b) > 1024 && s.traffic.Load() >= 4096}, s.group(seq, opWrite), s.readSeq.Load)
+				_, err := s.client.rpcACK(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Data: data, Bulk: len(b) > 1024 && s.traffic.Load() >= 4096, uploadHead: func() bool { return uploadHead.Load() == seq }}, s.group(seq, opWrite), s.readSeq.Load)
 				results <- completion{index, size, err}
 			}()
 		}
@@ -845,6 +855,7 @@ func (s *Conn) Write(b []byte) (int, error) {
 			}
 			delete(pending, acknowledged)
 			acknowledged++
+			uploadHead.Add(1)
 			total += result.size
 			s.client.uploaded.Add(uint64(result.size))
 			s.traffic.Add(uint64(result.size))

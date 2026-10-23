@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuite name="org.multidns.app.AppUiTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-10-22T20:23:51" hostname="5156efe084bc" time="33.383">
+  <testcase name="screensAt360dp" classname="org.multidns.app.AppUiTest" time="31.519" />
+  <testcase name="narrowScreenLargeFont" classname="org.multidns.app.AppUiTest" time="1.864" />
+  <system-out />
+  <system-err>Invalid ID 0x00000000.
+Invalid ID 0x00000000.
+Invalid ID 0x00000000.
+Invalid ID 0x00000000.
+</system-err>
+</testsuite>

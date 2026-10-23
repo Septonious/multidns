@@ -1,3 +1,54 @@
+# Version 0.3.8 — 23 October 2026
+
+Parent: 123e922 / 0.3.7. User confirms upload <2 Mbps with same resolver list
+as prior ~5 Mbps and server already at0.3.7. No fresh production JSON supplied.
+
+Client-side changes:
+- readAdmissionBudget separates current demand limit from learned readBudget.
+  During active uploads, new RX eligibility <=max(8, dataBudget/4); existing
+  leases drain without revocation. RX borrowing returns after uploads finish.
+  Debug adds read_admission_budget; detailed Android capture still off by default.
+- One queue-level cooldown timer replaces one 20 ms polling timer per queued
+  chunk. Eligible waiters wake from admission/release/control events; blocked
+  queue still resumes without packet completions, with cancellation respected.
+- Direct Write and SOCKS copyUpload expose atomic current prefix as a local
+  frame uploadHead callback (never serialized). Its delayed backup alone can
+  use existing foreground reserve ahead of queued bulk; queued foreground
+  work still wins. Normal bulk backups/physical limits remain unchanged.
+- Data reachability silence floor1s, or3RTTs if longer. Short ARQ and brief
+  path backoff still reroute immediately; yellow loss/high latency !=unavailable.
+- Version0.3.8/code15. Same server protocol, keys, profiles, HMAC/XOR and byte
+  overhead. Existing0.3.7server works; server binary update optional for parity.
+
+Validation:
+- Full race PASS core51.505s/mobile1.039s, vet PASS. New RX draining/restoration,
+  central timer/cooldown, shortARQ-vs-silence and head-only-rescue tests pass.
+- Upload-only control20paths, four512KiB sends +26idle +app echo: baseline2.87Mbps,
+  p95118.8/max615.4ms/170timeouts; final3.91 and3.48Mbps,
+  p95111.4/135.2, max144.8/169.9,0/1timeouts.
+- Duplex SOCKS20paths, four8MiB downloads +four1MiB uploads concurrently:
+  baseline7.646/1.124 and7.072/0.9794 down/up Mbps,3/7downs,max1080/2573ms;
+  final10.10/2.277,p95176.2/max436ms,0downs. Earlier same-policy check before
+  metadata bump9.296/1.957,p95207.2/max920.2,0downs. No hard500ms guarantee.
+  These synthetic two-CPU client+server results do not establish phone speeds.
+- Partial candidates retained:20health-down run, timeout in repeated duplex;
+  old harness's b.Fatal child phase caused misleading PASS despite FAIL output.
+  Harness now returns errors to benchmark parent. Do not erase the old failure.
+
+- Android build/lint (0 errors/18 warnings), two Robolectric UI tests and
+  instrumentation compilation passed. Version0.3.8/code15, original signing
+  certificate retained, both nativeABIs/6libraries pass ZIP+ELF16KiB checks.
+- Seven distributable checksums verified. New/old, old/new and new/new CLI
+  combinations each byte-verified256KiB HTTP uploads/downloads. Phone/native
+  VPN lifecycle not exercised. Current green screenshots in dist/validation/ui.
+
+Raw work/env: /workspace/work/multidns-0.3.8-validation. Control product source
+/workspace/work/multidns-0.3.7-control (benchmark helper only updated for identical
+traffic/error handling). Generated repo work moved out before commit. Production
+listen136.148.220.253:53, t.atmosl.ink ->ns2.atmosl.ink; preserve env/listen override.
+
+---
+
 # Version 0.3.7 — 22 October 2026
 
 Parent: 6928eb9 / 0.3.6. User: many resolvers fail to scale beyond 10–15 Mbps,

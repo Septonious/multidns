@@ -1,0 +1,1 @@
+ok  	github.com/Septonious/multidns/core	0.123s

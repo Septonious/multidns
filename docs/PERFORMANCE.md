@@ -1,3 +1,72 @@
+# 0.3.8: upload capacity and ordered repair (23 October 2026)
+
+The user confirms upload below 2 Mbps with the same resolver list that previously
+reached about 5 Mbps, and an updated 0.3.7 server. No fresh production snapshot
+was supplied; local results below are not phone measurements or a proof of the
+sole cause of that regression.
+
+Changes are client-side and compatible with the 0.3.7 server:
+- Separate learned RX ceiling from current receive eligibility. While a bulk
+  uploader is active, new reads use at most one quarter of shared data credits
+  (128/512 on a large pool). Existing physical reads drain normally. When upload
+  demand ends, downloads regain the learned ceiling without relearning it.
+- Replace the 20 ms polling timer on every waiting chunk with a single
+  queue-level cooldown timer. The profile of an intermediate simultaneous-load
+  fixture spent 19.27% cumulative CPU in acquisition, including timer/select
+  costs. Both client and simulated server share this two-CPU host; this is not
+  a phone CPU measurement.
+- Only the oldest unacknowledged upload chunk can use existing foreground
+  reserve for its delayed backup ahead of queued bulk. Later accepted chunks
+  cannot unblock the ordered stream without that prefix. Other bulk backups
+  remain behind unique queued work; queued foreground work retains priority.
+  Both SOCKS streaming and direct Conn.Write track the prefix atomically.
+- Keep fast data ARQ and rerouting, but require at least one second without
+  authenticated progress before data expirations mark a path unavailable (or
+  three RTTs if longer). Short retry deadlines no longer double as display
+  reachability deadlines. Congestion still reduces capacity sooner.
+- Keep total/path credits, negotiated reorder limits, profile/key format,
+  HMAC/XOR, UDP preference/TCP fallback and wire byte sizes unchanged.
+
+## Local comparison
+
+Upload-only fixture: 20 paths, four concurrent byte-verified 512 KiB uploads
+through Conn.Write, 26 idle connections and a separate application echo. Mbps
+is calculated from the full benchmark duration and 2 MiB useful upload, rather
+than the rounded MB/s display.
+
+| Source | Upload Mbps | p95 application echo ms | Maximum echo ms | Timeouts |
+|---|---:|---:|---:|---:|
+| 0.3.7 | 2.87 | 118.8 | 615.4 | 170 |
+| Final 0.3.8, run 1 | 3.91 | 111.4 | 144.8 | 0 |
+| Final 0.3.8, run 2 | 3.48 | 135.2 | 169.9 | 1 |
+
+The simultaneous-load SOCKS fixture uses 20 paths in pairs at 35–95 ms, four
+8 MiB downloads alongside four 1 MiB uploads, eight idle sessions, application
+echoes, and byte verification. No artificial loss/extra queue is injected in
+this capacity fixture. The unchanged 0.3.7 control measured 7.646/1.124 Mbps
+and 7.072/0.9794 Mbps down/up, with 3/7 health-downs and maximum echo 1080/2573 ms.
+Final 0.3.8 measured 10.10/2.277 Mbps, p95 176.2 / max 436.0 ms and zero downs.
+An earlier check of the same final transport policy, before version metadata
+changed, measured 9.296/1.957 Mbps, p95 207.2 / max 920.2 ms and zero downs.
+Thus speed and status behavior improve in these comparisons, but the 500 ms
+RTT target is still not a proven hard bound and a real phone gain is unverified.
+
+Partial candidates are retained in validation/intermediate, including a run
+with 20 health-downs, and a repeated duplex case that timed out. The early
+benchmark called b.Fatal inside its background phase, producing contradictory
+FAIL/PASS output; the harness now returns phase errors to the parent benchmark.
+Do not treat that old PASS line as success. Later good runs do not erase these
+failures or establish universal stability. The final policy includes both the
+silence guard and ordered-prefix repair; the failed partial candidates did not.
+
+The complete race suite passed: core 51.505 s / mobile 1.039 s, followed by vet.
+Regression coverage verifies RX credit borrowing/draining/restoration, queue
+progress after cooldown with no packet completions, short ARQ vs confirmed
+silence, and head-only repair ahead of bulk. Existing streaming upload byte
+integrity/half-close, fairness, cancellation, stale replies and TCP tests pass.
+
+---
+
 # Performance and tuning
 
 ## Version 0.3.7: complete physical feedback and a wider download pipeline

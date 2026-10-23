@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -51,6 +52,8 @@ func (s *Conn) copyUpload(src net.Conn) (int64, error) {
 	var block []byte
 	var sourceErr error
 	var total int64
+	var uploadHead atomic.Uint32
+	uploadHead.Store(s.writeSeq)
 	next, acknowledged, completed := 0, 0, 0
 	active := false
 	setActive := func(on bool) {
@@ -79,7 +82,7 @@ func (s *Conn) copyUpload(src net.Conn) (int64, error) {
 			s.writeSeq++
 			bulk := active && s.traffic.Load() >= 4096
 			go func() {
-				_, err := s.client.rpcACK(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Data: data, Bulk: bulk}, s.base, s.readSeq.Load)
+				_, err := s.client.rpcACK(ctx, frame{Op: opWrite, Stream: s.id, Seq: seq, Data: data, Bulk: bulk, uploadHead: func() bool { return uploadHead.Load() == seq }}, s.base, s.readSeq.Load)
 				results <- completion{index, size, err}
 			}()
 		}
@@ -118,6 +121,7 @@ func (s *Conn) copyUpload(src net.Conn) (int64, error) {
 			}
 			delete(pending, acknowledged)
 			acknowledged++
+			uploadHead.Add(1)
 			total += int64(r.size)
 			s.client.uploaded.Add(uint64(r.size))
 			s.traffic.Add(uint64(r.size))

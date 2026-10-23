@@ -1,4 +1,4 @@
-# Resolvers and diagnostics (0.3.7)
+# Resolvers and diagnostics (0.3.8)
 
 ## Automatic transport
 
@@ -185,3 +185,23 @@ per-path loss remains handled by individual controllers and ARQ.
 Smaller path limits remain authoritative. A configured short timeout remains
 a hard ceiling, including in TCP mode. Normal snapshots remain slim and debug
 capture stays disabled by default.
+
+### 0.3.8 upload demand and reachability
+
+`read_budget` is the learned receive ceiling. `read_admission_budget` is the
+current receive eligibility limit: during active uploads it is at most one
+quarter of the shared data budget (128 of 512 on a large pool). Existing
+physical reads retain their credits until completion; the limiter cannot revoke
+them. After uploads finish, the learned receive budget becomes available again.
+A small response/read floor remains, with existing per-path and fairness limits.
+
+Only the oldest unacknowledged upload chunk may use foreground-reserved room
+for its delayed backup while bulk is queued. This applies to SOCKS streaming
+and direct Conn.Write. It does not raise total/per-path credits or remove pacing
+from the primary. Foreground queued work retains priority.
+
+Fast ARQ timeouts keep rerouting work immediately, but three expirations can only
+open the displayed unavailable circuit after at least one second without
+authenticated progress (longer for a high known RTT). Congestion still reduces
+capacity and can show a yellow warning sooner. High latency itself remains a
+quality state, separate from reachability. Detailed capture stays off by default.

@@ -1,0 +1,7 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Septonious/multidns/core
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkDuplexPool/paths-20/group-2-2         	       1	37957693534 ns/op	        81.00 abandoned-timeouts	      2573 app-max-ms	       255.8 app-p95-ms	       298.0 app-samples	         7.072 download-Mbps	         7.000 health-downs	       128.0 peer-read-window	       320.0 read-budget	       490.0 retries	       561.0 timeouts	         0.9794 upload-Mbps	   4203382 uploaded-bytes
+PASS
+ok  	github.com/Septonious/multidns/core	40.074s

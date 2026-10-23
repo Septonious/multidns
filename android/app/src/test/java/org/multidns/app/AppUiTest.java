@@ -149,7 +149,7 @@ public class AppUiTest {
               .put("rtt_ms", 43 + i * 4));
     TunnelService.stats =
         new JSONObject()
-            .put("transport_version", "0.3.7")
+            .put("transport_version", "0.3.8")
             .put("uploaded", 2200000)
             .put("downloaded", 6960000)
             .put("streams", 8)

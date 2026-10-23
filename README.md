@@ -43,7 +43,7 @@ This is the explicit precedence model, not a promise of undocumented ITOM behavi
 ## Builds
 
 Local builds are saved in [`dist/`](dist/): the Android debug APK and Linux
-amd64/arm64 server, client, and scanner binaries. Version 0.3.7 keeps the compact
+amd64/arm64 server, client, and scanner binaries. Version 0.3.8 keeps the compact
 dark green interface and automatic resolver control. The **Resolvers** tab offers
 ICMP + authenticated E2E tests while disconnected, then slim live cards with
 latency, stream assignments, UDP/TCP transport and status. Detailed debug
@@ -56,6 +56,14 @@ Update the server and APK together to enable the new download window. Version
 budget from 160 toward 320 only under successful sustained demand. Older
 servers remain compatible at their existing 64-chunk / 160-request limits.
 The main-page reachable count now includes responding high-latency resolvers.
+
+Version 0.3.8 leaves more shared receive credits available to uploads while
+writers are active, then restores download borrowing when they finish. One
+queue-level cooldown timer replaces per-chunk polling. The oldest missing
+upload chunk can repair through existing foreground reserve; ordinary bulk
+backups remain behind unique queued work. Short ARQ expirations do not turn
+into an unavailable status until at least one second without authenticated
+progress. This client update works with the existing 0.3.7 server.
 
 The SOCKS upload pipeline now spans local TCP read boundaries, without a flush
 round trip after every buffer. Separate TX/RX feedback prevents lost downloads

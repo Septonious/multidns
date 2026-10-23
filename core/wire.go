@@ -74,17 +74,18 @@ func downloadCapacity(p Profile) int {
 }
 
 type frame struct {
-	wake    func() <-chan struct{} // local activity notification; never serialized
-	Bulk    bool                   // local scheduler hint; never serialized
-	Retry   bool                   // local diagnostic hint
-	XOR     bool                   // authenticated high bit in operation; no added bytes
-	Op      byte
-	Session uint64
-	Stream  uint32
-	Seq     uint32
-	Ack     uint32
-	Nonce   uint64
-	Data    []byte
+	uploadHead func() bool            // local ordered-prefix hint; never serialized
+	wake       func() <-chan struct{} // local activity notification; never serialized
+	Bulk       bool                   // local scheduler hint; never serialized
+	Retry      bool                   // local diagnostic hint
+	XOR        bool                   // authenticated high bit in operation; no added bytes
+	Op         byte
+	Session    uint64
+	Stream     uint32
+	Seq        uint32
+	Ack        uint32
+	Nonce      uint64
+	Data       []byte
 }
 
 func (f frame) pack(key string) []byte {

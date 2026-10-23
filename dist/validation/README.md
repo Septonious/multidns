@@ -1,27 +1,30 @@
-# 0.3.7 validation
+# 0.3.8 validation
 
-Full final-product race suite passed (core 51.221 s, mobile 1.080 s), followed
-by vet. Additional RX relearning, cancellation/TCP repeats, late-reply and
-backpressure repeats passed. Android build, lint (0 errors/18 warnings), two
-Robolectric UI tests, instrumentation compilation, original signing identity,
-16 KiB ZIP/ELF alignment, both HEV/JNI ABIs and all seven checksums passed.
-Old/new, new/old and new/new CLI pairs transferred byte-verified 256 KiB HTTP
-uploads/downloads. The physical Oppo and native VPN lifecycle were not tested.
+Final product race suite passed (core51.505s/mobile1.039s), followed by vet.
+Android build/lint (0 errors/18 warnings), two Robolectric screen tests,
+instrumentation compilation, original signing identity, both native ABIs,
+16 KiB ZIP/ELF alignment and all seven checksums passed. Old/new, new/old and
+new/new CLI pairs passed authenticated startup and byte-verified256KiB HTTP
+uploads/downloads. No physical Oppo or native VPN lifecycle run on this host.
 
-capacity-before/final use identical 36-path SHA-verified sustained traffic:
-0.3.6 11.80/2.902 Mbps down/up, p95 109.7/max 1127 ms, zero health-downs;
-0.3.7 13.13/2.522 Mbps, p95 159.9/max 775.7 ms, four health-downs.
-Upload and status transitions regressed in this sample. Do not claim a
-consistent speed or stability improvement from these measurements.
+Upload-only control:20paths, four512KiB sends +26idle connections +app echo.
+upload-before:2.87Mbps (p95118.8/max615.4ms),170timeouts.
+upload-release:3.91/3.48Mbps (p95111.4/135.2,max144.8/169.9ms),0/1timeouts.
+Use the precise transfer duration/2MiB useful total to convert to Mbps;
+the benchmark's MB/s display is rounded.
 
-sustained-before/final add deterministic sparse read loss and queueing:
-original group-two baseline 8.094/1.656 Mbps, p95 212.1/max 723.8 ms, five downs;
-final policy 6.766/2.145 Mbps, p95 228.9/max 1489 ms, zero downs.
-The 500 ms target is not a proven hard bound. Global/path feedback and recovery
-now cover previously ignored physical outcomes, but remaining tails require
-production measurements. See docs/PERFORMANCE.md for fixture scope and limits.
+Duplex SOCKS:20paths in pairs, four8MiB downloads alongside four1MiB uploads,
+eight idle connections and byte-verified transfers/application echoes.
+Before:7.646/1.124 and7.072/0.9794Mbps down/up,3/7downs,max1080/2573ms.
+Final release:10.10/2.277Mbps,p95176.2/max436ms,zero downs.
+head-benchmarks is an earlier same-policy check before version metadata change:
+9.296/1.957Mbps,p95207.2/max920.2ms,zero downs. It is retained to show tail
+variability. The500ms target is not a demonstrated hard bound, and these
+client+simulated-server measurements on a two-CPU host are not phone speeds.
 
-intermediate/ preserves failed full-suite/TCP runs and earlier candidates.
-The TCP timing fixture changed 150 to 400 ms with its original zero-timeout
-and bounded-connection assertions retained. A later pass does not erase old
-failures. Previous release evidence, including its intermediates, is in 0.3.6/.
+intermediate/ retains partial policies, including20downs and a timed-out
+repeated duplex run. Its old benchmark b.Fatal background phase printed
+contradictory FAIL/PASS; the final harness returns phase errors to the parent.
+Do not count that PASS line as success. Later passing runs do not erase it.
+See docs/PERFORMANCE.md for scope and remaining limits. Prior release evidence
+is archived in0.3.7/, including its original intermediates and screenshots.
